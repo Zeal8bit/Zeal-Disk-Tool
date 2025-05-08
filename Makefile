@@ -12,10 +12,10 @@ TARGET=zeal_disk_tool.elf
 # Path for linuxdeploy
 LINUXDEPLOY?=./linuxdeploy-x86_64.AppImage
 
-all: $(TARGET)
+all: include/app_version.h $(TARGET)
 
 include/app_version.h: FORCE
-	echo "#define VERSION \"$$(git describe --always || echo local)\"" > $@
+	@echo "#define VERSION \"$$(git describe --always || echo local)\"" > $@
 
 FORCE:
 

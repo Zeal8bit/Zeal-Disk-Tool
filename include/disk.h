@@ -6,6 +6,7 @@
 #ifndef DISK_H
 #define DISK_H
 
+#include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -66,7 +67,12 @@ extern disk_info_t disks[MAX_DISKS];
 extern int disk_count;
 extern int selected_disk;
 
-disk_err_t disks_refresh();
+static inline disk_info_t* disk_get_current(void)
+{
+    return (disk_count > 0) ? &disks[selected_disk] : NULL;
+}
+
+disk_err_t disks_refresh(void);
 
 void disk_apply_changes(disk_info_t* disk);
 
@@ -79,6 +85,8 @@ void disk_parse_mbr_partitions(disk_info_t *disk);
 const char* const *disk_get_partition_size_list(void);
 
 void disk_allocate_partition(disk_info_t *disk, uint32_t lba, int size_idx);
+
+const char* disk_format_partition(disk_info_t* disk, int partition);
 
 void disk_delete_partition(disk_info_t* disk, int partition);
 

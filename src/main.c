@@ -16,9 +16,14 @@
 #include "ui.h"
 #include "ui/popup.h"
 
+#define MENUBAR_HEIGHT  30
+
 static struct nk_context *ctx;
+static int new_partition_choosen_option;
+static int selected_partition;
 
 int winWidth, winHeight;
+
 
 static struct nk_color get_partition_color(int i)
 {
@@ -327,6 +332,66 @@ static void ui_new_partition(struct nk_context *ctx, disk_info_t* disk)
 }
 
 
+static void ui_menubar(struct nk_context *ctx)
+{
+    static popup_info_t info;
+    disk_info_t* current_disk = disk_get_current();
+
+    if (nk_begin(ctx, "Menu", nk_rect(0, 0, winWidth, MENUBAR_HEIGHT), NK_WINDOW_NO_SCROLLBAR)) {
+        nk_menubar_begin(ctx);
+
+        const float ratios[] = { 0.04f, 0.07f, 0.04f };
+        nk_layout_row(ctx, NK_DYNAMIC, 25, 3, ratios);
+
+        if (nk_menu_begin_label(ctx, "File", NK_TEXT_LEFT, nk_vec2(130, 200))) {
+            nk_layout_row_dynamic(ctx, 25, 1);
+            if (nk_menu_item_label(ctx, "Refresh devices", NK_TEXT_LEFT)) {
+                disks_refresh();
+            } else if (nk_menu_item_label(ctx, "Apply changes", NK_TEXT_LEFT) && current_disk != NULL && current_disk->has_staged_changes) {
+                popup_open(POPUP_APPLY, 300, 130, NULL);
+            } else if (nk_menu_item_label(ctx, "Cancel changes", NK_TEXT_LEFT) && current_disk != NULL && current_disk->has_staged_changes) {
+                popup_open(POPUP_CANCEL, 300, 130, NULL);
+            } else if (nk_menu_item_label(ctx, "Quit", NK_TEXT_LEFT)) {
+                CloseWindow();
+            }
+            nk_menu_end(ctx);
+        }
+
+        if (nk_menu_begin_label(ctx, "Partition", NK_TEXT_LEFT, nk_vec2(100, 200))) {
+            nk_layout_row_dynamic(ctx, 25, 1);
+             if (nk_menu_item_label(ctx, "Create MBR", NK_TEXT_LEFT) && current_disk != NULL) {
+                // popup_open(POPUP_MBR, 300, 140, &info);
+            } else if (nk_menu_item_label(ctx, "New", NK_TEXT_LEFT) && current_disk != NULL) {
+                popup_open(POPUP_NEWPART, 300, 300, &new_partition_choosen_option);
+            } else if (nk_menu_item_label(ctx, "Delete", NK_TEXT_LEFT) && current_disk != NULL) {
+                disk_delete_partition(current_disk, selected_partition);
+            } else if (nk_menu_item_label(ctx, "Format", NK_TEXT_LEFT)) {
+                const char* error = disk_format_partition(current_disk, selected_partition);
+                info.title = "Format partition";
+                info.msg = error ? error : "Success!";
+                popup_open(POPUP_MBR, 300, 140, &info);
+            }
+            nk_menu_end(ctx);
+        }
+
+        if (nk_menu_begin_label(ctx, "Help", NK_TEXT_LEFT, nk_vec2(100, 200))) {
+            nk_layout_row_dynamic(ctx, 25, 1);
+            if (nk_menu_item_label(ctx, "About", NK_TEXT_LEFT)) {
+                info = (popup_info_t) {
+                    .title = "About",
+                    .msg = "Zeal Disk Tool\nCreate ZealFS v2 partitions for disks!",
+                };
+                popup_open(POPUP_MBR, 300, 140, &info);
+            }
+            nk_menu_end(ctx);
+        }
+
+        nk_menubar_end(ctx);
+    }
+    nk_end(ctx);
+}
+
+
 static void setup_window() {
     InitWindow(0, 0, "Zeal Disk Tool " VERSION);
 
@@ -377,21 +442,19 @@ int main(void) {
     Font font = LoadFontFromNuklear(fontSize);
     ctx = InitNuklearEx(font, fontSize);
 
-
-
-    int selected_partition = 0;
-
     while (!WindowShouldClose()) {
         UpdateNuklear(ctx);
 
         /* If any popup is opened, the main window must not be focusable */
         const int flags = popup_any_opened() ? NK_WINDOW_NO_INPUT : 0;
-        disk_info_t* current_disk = &disks[selected_disk];
+        disk_info_t* current_disk = disk_get_current();
 
-        if (nk_begin(ctx, "Disks", nk_rect(0, 0, winWidth, winHeight), flags)) {
+        nk_style_push_style_item(ctx, &ctx->style.window.fixed_background,
+                                nk_style_item_color(nk_rgb(0x39, 0x39, 0x39)));
+        if (nk_begin(ctx, "Disks", nk_rect(0, MENUBAR_HEIGHT, winWidth, winHeight), flags)) {
 
             /* Create the top row with the buttons and the disk selection */
-            const float ratio[] = { 0.10f, 0.15f, 0.15f, 0.07f, 0.07f, 0.15f, 0.4f };
+            const float ratio[] = { 0.10f, 0.15f, 0.15f, 0.07f, 0.07f, 0.15f, 0.3f };
             nk_layout_row(ctx, NK_DYNAMIC, COMBO_HEIGHT, 7, ratio);
 
             /* Create the button with label "MBR" */
@@ -399,7 +462,7 @@ int main(void) {
                 nk_tooltip(ctx, "Create an MBR on the disk");
             }
             /* Only enable the buttons if we have at least one disk */
-            if (nk_button_label(ctx, "Create MBR") && disk_count > 0) {
+            if (nk_button_label(ctx, "Create MBR") && current_disk != NULL) {
                 static popup_info_t info;
                 info.title = "Create MBR table";
                 if (current_disk->has_mbr) {
@@ -416,8 +479,7 @@ int main(void) {
                 nk_tooltip(ctx, "Create a new partition on the disk");
             }
             if (nk_button_label(ctx, "New partition") && disk_count > 0) {
-                static int choosen_option = 0;
-                popup_open(POPUP_NEWPART, 300, 300, &choosen_option);
+                popup_open(POPUP_NEWPART, 300, 300, &new_partition_choosen_option);
             }
 
             /* Create the button to delete a partition */
@@ -447,7 +509,6 @@ int main(void) {
 
             int new_selection = ui_combo_disk(ctx, selected_disk, disks, disk_count, combo_width);
             if (new_selection != selected_disk) {
-                printf("disk changed: %d\n", new_selection);
                 if (current_disk->has_staged_changes) {
                     static popup_info_t info = {
                         .title = "Cannot switch disk",
@@ -458,16 +519,19 @@ int main(void) {
                 }
             }
 
-
             ui_draw_disk(ctx, current_disk, &selected_partition);
         }
         nk_end(ctx);
+        nk_style_pop_style_item(ctx);
 
         /* Manage the popups here */
         ui_mbr_handle(ctx, current_disk);
         ui_apply_handle(ctx, current_disk);
         ui_cancel_handle(ctx, current_disk);
         ui_new_partition(ctx, current_disk);
+
+        /* Make the menubar always on top */
+        ui_menubar(ctx);
 
         BeginDrawing();
             ClearBackground(WHITE);

@@ -9,3 +9,4 @@ build/
 appdir/*.res
 zeal_disk_tool.elf.dSYM
 .vscode/settings.json
+include/app_version.h

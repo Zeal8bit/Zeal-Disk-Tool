@@ -11,11 +11,12 @@
 #include "zealfs_v2.h"
 
 
- disk_info_t disks[MAX_DISKS];
+disk_info_t disks[MAX_DISKS];
 int disk_count = 0;
 int selected_disk = 0;
 
-disk_err_t disks_refresh() {
+disk_err_t disks_refresh(void)
+{
     disk_err_t err = disk_list(disks, MAX_DISKS, &disk_count);
     if(err != ERR_SUCCESS) return err;
 
@@ -25,7 +26,7 @@ disk_err_t disks_refresh() {
         disk_get_size_str(disks[i].size_bytes, size_str, sizeof(size_str));
         /* Keep the first character empty, it will be a `*` in case there is any pending change */
         snprintf(disks[i].label, DISK_LABEL_LEN, " %.*s (%s)", (int) sizeof(disks[i].name), disks[i].name, size_str);
-        printf("Disk: %s\n", disks[i].label);
+        printf("[DISK] Refreshed disk: %s\n", disks[i].label);
         disk_parse_mbr_partitions(&disks[i]);
     }
 
@@ -103,7 +104,7 @@ void disk_allocate_partition(disk_info_t *disk, uint32_t lba, int size_idx)
     part->data_len = page_size * 3;
     part->data = calloc(3, page_size);
     if (part->data == NULL) {
-        printf("Could not allocate memory!\n");
+        printf("[DISK] Could not allocate memory!\n");
         exit(1);
     } else {
         printf("[DISK] Allocated %d bytes (3 pages)\n", 3*page_size);
@@ -113,6 +114,36 @@ void disk_allocate_partition(disk_info_t *disk, uint32_t lba, int size_idx)
 
     /* Reuse the free partition index */
     disk->free_part_idx = disk_find_free_partition(disk);
+}
+
+
+const char* disk_format_partition(disk_info_t* disk, int partition)
+{
+    if (partition < 0 || partition >= MAX_PART_COUNT || !disk->staged_partitions[partition].active) {
+        return "Please select a valid partition!";
+    }
+
+    partition_t* part = &disk->staged_partitions[partition];
+    const uint64_t part_size_bytes = part->size_sectors * DISK_SECTOR_SIZE;
+    const int page_size = zealfsv2_page_size(part_size_bytes);
+    /* Format the partition with data. We need to allocate 3 pages at all time:
+     * - One for the header
+     * - Two for the FAT
+     */
+    free(part->data);
+    disk->has_staged_changes = true;
+    part->type = 0x5a;
+    part->data_len = page_size * 3;
+    part->data = calloc(3, page_size);
+    if (part->data == NULL) {
+        printf("[DISK][FORMAT] Could not allocate memory!\n");
+        exit(1);
+    } else {
+        printf("[DISK][FORMAT] Allocated %d bytes (3 pages)\n", 3*page_size);
+    }
+    zealfsv2_format(part->data, part_size_bytes);
+    printf("[DISK][FORMAT] Partition %d data: %p, length: %d\n", disk->free_part_idx, part->data, part->data_len);
+    return NULL;
 }
 
 
