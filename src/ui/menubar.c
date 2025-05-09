@@ -30,8 +30,6 @@ void ui_menubar_new_partition(struct nk_context *ctx, disk_info_t* disk, int *ch
 {
     if (disk != NULL) {
         popup_open(POPUP_NEWPART, 300, 300, choose_option);
-    } else {
-
     }
 }
 
@@ -68,6 +66,8 @@ void ui_menubar_cancel_changes(struct nk_context *ctx, disk_info_t* disk)
 
 int ui_menubar_show(struct nk_context *ctx, disk_list_state_t* state, int width)
 {
+    int must_exit = 0;
+
     if (nk_begin(ctx, "Menu", nk_rect(0, 0, width, MENUBAR_HEIGHT), NK_WINDOW_NO_SCROLLBAR)) {
         nk_menubar_begin(ctx);
 
@@ -85,7 +85,7 @@ int ui_menubar_show(struct nk_context *ctx, disk_list_state_t* state, int width)
             } else if (nk_menu_item_label(ctx, "Cancel changes", NK_TEXT_LEFT)) {
                 popup_open(POPUP_CANCEL, 300, 130, NULL);
             } else if (nk_menu_item_label(ctx, "Quit", NK_TEXT_LEFT)) {
-                return 1;
+                must_exit = 1;
             }
             nk_menu_end(ctx);
         }
@@ -123,5 +123,5 @@ int ui_menubar_show(struct nk_context *ctx, disk_list_state_t* state, int width)
     }
     nk_end(ctx);
 
-    return 0;
+    return must_exit;
 }

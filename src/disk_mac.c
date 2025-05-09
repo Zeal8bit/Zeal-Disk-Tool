@@ -18,6 +18,56 @@
 #include <sys/disk.h>
 
 
+static disk_err_t disk_try_open(const char* path, disk_info_t* info, int is_file)
+{
+    uint64_t block_count = 0;
+    uint64_t block_size = 0;
+
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        if (errno == EACCES) {
+            return ERR_NOT_ADMIN;
+        }
+        return ERR_INVALID;
+    }
+
+    if (is_file) {
+        struct stat st;
+        if (fstat(fd, &st) != 0) {
+            fprintf(stderr, "Could not get file %s size: %s\n", path, strerror(errno));
+            close(fd);
+            return ERR_INVALID;
+        }
+        info->size_bytes = st.st_size;
+    } else if (ioctl(fd, DKIOCGETBLOCKCOUNT, &block_count) != 0 ||
+               ioctl(fd, DKIOCGETBLOCKSIZE, &block_size) != 0) {
+        fprintf(stderr, "Could not get disk %s size: %s\n", path, strerror(errno));
+        close(fd);
+        return ERR_INVALID;
+    } else {
+        info->size_bytes = block_count * block_size;
+    }
+
+    info->valid = info->size_bytes <= MAX_DISK_SIZE;
+    if (!info->valid) {
+        fprintf(stderr, "%s exceeds max disk size of %lluGB with %lluGB bytes\n", path, MAX_DISK_SIZE/GB, info->size_bytes/GB);
+    }
+
+    strncpy(info->name, path, sizeof(info->name) - 1);
+    strncpy(info->path, path, sizeof(info->path) - 1);
+
+    ssize_t r = read(fd, info->mbr, DISK_SECTOR_SIZE);
+    if (r == DISK_SECTOR_SIZE) {
+        info->has_mbr = (info->mbr[DISK_SECTOR_SIZE - 2] == 0x55 &&
+                         info->mbr[DISK_SECTOR_SIZE - 1] == 0xAA);
+    } else {
+        info->has_mbr = false;
+    }
+
+    close(fd);
+    return ERR_SUCCESS;
+}
+
 disk_err_t disk_list(disk_info_t* out_disks, int max_disks, int* out_count) {
     memset(out_disks, 0, sizeof(disk_info_t) * max_disks);
     *out_count = 0;
@@ -25,45 +75,14 @@ disk_err_t disk_list(disk_info_t* out_disks, int max_disks, int* out_count) {
     for (int i = 1; i <= max_disks && *out_count < max_disks; ++i) {
         char path[256];
         snprintf(path, sizeof(path), "/dev/rdisk%d", i);
-
-        int fd = open(path, O_RDONLY);
-        if (fd < 0) {
-            if (errno == EACCES) {
-                return ERR_NOT_ADMIN;
-            }
+        disk_err_t err = disk_try_open(path, &out_disks[*out_count], 0);
+        if (err == ERR_SUCCESS) {
+            (*out_count)++;
+        } else if (err == ERR_INVALID) {
             continue;
-        }
-
-        uint64_t block_count = 0, block_size = 0;
-        if (ioctl(fd, DKIOCGETBLOCKCOUNT, &block_count) != 0 ||
-            ioctl(fd, DKIOCGETBLOCKSIZE, &block_size) != 0) {
-            fprintf(stderr, "Could not get disk %s size: %s\n", path, strerror(errno));
-            close(fd);
-            continue;
-        }
-
-        disk_info_t* info = &out_disks[*out_count];
-        uint64_t size_bytes = block_count * block_size;
-        if (size_bytes > MAX_DISK_SIZE) {
-            info->valid = false;
-            fprintf(stderr, "%s exceeds max disk size of %lluGB with %lluGB bytes\n", path, MAX_DISK_SIZE/GB, size_bytes/GB);
         } else {
-            info->valid = true;
+            return err;
         }
-
-        strncpy(info->name, path, sizeof(info->name) - 1);
-        info->size_bytes = size_bytes;
-
-        ssize_t r = read(fd, info->mbr, DISK_SECTOR_SIZE);
-        if (r == DISK_SECTOR_SIZE) {
-            info->has_mbr = (info->mbr[DISK_SECTOR_SIZE - 2] == 0x55 &&
-                             info->mbr[DISK_SECTOR_SIZE - 1] == 0xAA);
-        } else {
-            info->has_mbr = false;
-        }
-
-        close(fd);
-        (*out_count)++;
     }
 
     return ERR_SUCCESS;

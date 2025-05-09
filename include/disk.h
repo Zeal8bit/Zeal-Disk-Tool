@@ -29,6 +29,7 @@ typedef enum {
     ERR_SUCCESS,
     ERR_NOT_ADMIN,  /* Windows   */
     ERR_NOT_ROOT,   /* Linux/Mac */
+    ERR_INVALID,
 } disk_err_t;
 
 

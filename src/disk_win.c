@@ -37,10 +37,10 @@ disk_err_t disk_list(disk_info_t* out_disks, int max_disks, int* out_count) {
             info->size_bytes = 0;
         }
 
-        if (info->size_bytes > MAX_DISK_SIZE) {
-            CloseHandle(hDisk);
+
+        info->valid = info->size_bytes <= MAX_DISK_SIZE;
+        if (!info->valid) {
             fprintf(stderr, "%s exceeds max disk size of %lluGB with %lluGB bytes\n", path, MAX_DISK_SIZE/GB, info->size_bytes/GB);
-            continue;
         }
 
         /* Read MBR */

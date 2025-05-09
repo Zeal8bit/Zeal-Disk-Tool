@@ -14,72 +14,90 @@
 #include <linux/fs.h>
 #include <sys/ioctl.h>
 
-#define DEBUG_DISKS 0
+#define DIM(arr) (sizeof(arr) / sizeof(*(arr)))
 
-disk_err_t disk_list(disk_info_t* out_disks, int max_disks, int* out_count) {
+static const char* s_image_files[] = {
+    // "emulated_sd.img",
+    // "backup_sd.img",
+    // "test_disk.img"
+};
 
-#if DEBUG_DISKS
-    out_disks[0] =  (disk_info_t) {
-        .name = "/dev/sda",
-        .size_bytes = 4026531840ULL,
-        .has_mbr = true,
-    };
-    out_disks[1] =  (disk_info_t) {
-        .name = "/dev/sdb",
-        .size_bytes = 32*1024*1024,
-        .has_mbr = true,
-    };
-    *out_count = 2;
+static disk_err_t disk_try_open(const char* path, disk_info_t* info, int is_file)
+{
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        if (errno == EACCES) {
+            return ERR_NOT_ADMIN;
+        } else if (errno == ENOENT) {
+            return ERR_INVALID;
+        }
+        perror("Could not open the disk");
+        return ERR_INVALID;
+    }
 
+    strcpy(info->name, path);
+    strcpy(info->path, path);
+
+    /* Get the size of the disk, make sure it is not bigger than expected */
+    if (is_file) {
+        struct stat st;
+        if (fstat(fd, &st) != 0) {
+            fprintf(stderr, "Could not get file %s size: %s\n", path, strerror(errno));
+            close(fd);
+            return ERR_INVALID;
+        }
+        info->size_bytes = st.st_size;
+    } else if (ioctl(fd, BLKGETSIZE64, &info->size_bytes) != 0) {
+        fprintf(stderr, "Could not get disk %s size: %s\n", path, strerror(errno));
+        close(fd);
+        return ERR_INVALID;
+    }
+
+    info->valid = info->size_bytes <= MAX_DISK_SIZE;
+    if (!info->valid) {
+        fprintf(stderr, "%s exceeds max disk size of %lluGB with %lluGB bytes\n", path, MAX_DISK_SIZE/GB, info->size_bytes/GB);
+    }
+
+    /* Read MBR */
+    ssize_t r = read(fd, info->mbr, DISK_SECTOR_SIZE);
+    if (r == DISK_SECTOR_SIZE) {
+        info->has_mbr = (info->mbr[DISK_SECTOR_SIZE - 2] == 0x55 &&
+                            info->mbr[DISK_SECTOR_SIZE - 1] == 0xAA);
+    } else {
+        info->has_mbr = false;
+    }
+
+    close(fd);
     return ERR_SUCCESS;
-#endif
+}
+
+
+disk_err_t disk_list(disk_info_t* out_disks, int max_disks, int* out_count)
+{
     memset(out_disks, 0, sizeof(disk_info_t) * max_disks);
     *out_count = 0;
-
     for (char c = 'a'; c <= 'z' && *out_count < max_disks; ++c) {
         char path[256];
         snprintf(path, sizeof(path), "/dev/sd%c", c);
-
-        int fd = open(path, O_RDONLY);
-        if (fd < 0) {
-            if (errno == EACCES) {
-                return ERR_NOT_ADMIN;
-            } else if (errno == ENOENT) {
-                continue;
-            }
-            perror("Could not open the disk");
+        disk_err_t err = disk_try_open(path, &out_disks[*out_count], 0);
+        if (err == ERR_SUCCESS) {
+            (*out_count)++;
+        } else if (err == ERR_INVALID) {
             continue;
-        }
-
-        disk_info_t* info = &out_disks[*out_count];
-        strcpy(info->name, path);
-        strcpy(info->path, path);
-
-        /* Get the size of the disk, make sure it is not bigger than expected */
-        if (ioctl(fd, BLKGETSIZE64, &info->size_bytes) != 0) {
-            fprintf(stderr, "Could not get disk %s size: %s\n", path, strerror(errno));
-            close(fd);
-            return 1;
-        }
-
-
-        if (info->size_bytes > MAX_DISK_SIZE) {
-            close(fd);
-            fprintf(stderr, "%s exceeds max disk size of %lluGB with %lluGB bytes\n", path, MAX_DISK_SIZE/GB, info->size_bytes/GB);
-            continue;
-        }
-
-        /* Read MBR */
-        ssize_t r = read(fd, info->mbr, DISK_SECTOR_SIZE);
-        if (r == DISK_SECTOR_SIZE) {
-            info->has_mbr = (info->mbr[DISK_SECTOR_SIZE - 2] == 0x55 &&
-                             info->mbr[DISK_SECTOR_SIZE - 1] == 0xAA);
         } else {
-            info->has_mbr = false;
+            return err;
         }
+    }
 
-        close(fd);
-        (*out_count)++;
+
+    /* Check for images */
+    if (0 && *out_count < max_disks) {
+        for (size_t i = 0; i < DIM(s_image_files) && *out_count < max_disks; ++i) {
+            disk_err_t err = disk_try_open(s_image_files[i], &out_disks[*out_count], 1);
+            if (err == ERR_SUCCESS) {
+                (*out_count)++;
+            }
+        }
     }
 
     return ERR_SUCCESS;
@@ -88,15 +106,14 @@ disk_err_t disk_list(disk_info_t* out_disks, int max_disks, int* out_count) {
 
 const char* disk_write_changes(disk_info_t* disk)
 {
-#if DEBUG_DISKS
-    return NULL;
-#endif
-    static char error_msg[1024];
     assert(disk);
+    assert(disk->valid);
     assert(disk->has_mbr);
     assert(disk->has_staged_changes);
-    /* Reopen the disk to write it back */
 
+    static char error_msg[1024];
+
+    /* Reopen the disk to write it back */
     int fd = open(disk->name, O_WRONLY);
     if (fd < 0) {
         sprintf(error_msg, "Could not open disk %s: %s\n", disk->name, strerror(errno));
@@ -132,9 +149,9 @@ const char* disk_write_changes(disk_info_t* disk)
         }
     }
 
+    close(fd);
     /* Apply the changes in RAM too */
     disk_apply_changes(disk);
-    close(fd);
     return NULL;
 error:
     close(fd);

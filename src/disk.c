@@ -45,6 +45,7 @@ disk_err_t disks_refresh(void)
 
     if (s_state.disk_count == 0) {
         ui_statusbar_print("No disk found!\n");
+        s_state.selected_disk = 0;
     } else {
         ui_statusbar_print("Disk list refreshed successfully\n");
     }
@@ -301,6 +302,10 @@ void disk_get_size_str(uint64_t size, char* buffer, int buffer_size)
  */
 void disk_parse_mbr_partitions(disk_info_t *disk)
 {
+    if (!disk->has_mbr) {
+        return;
+    }
+
     int free_part_idx = -1;
 
     for (int i = 0; i < MAX_PART_COUNT; ++i) {

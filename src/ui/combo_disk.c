@@ -5,10 +5,14 @@
 #include "raylib-nuklear.h"
 #include "raylib.h"
 #include "ui.h"
+#include "ui/statusbar.h"
 
-int ui_combo_disk(struct nk_context *ctx, disk_list_state_t* state, int width) {
-    /* If we didn't find any disk, at least show the first one in teh combo box, it that has a dummy message */
-    const int show_items = NK_MAX(state->disk_count, 1);
+int ui_combo_disk(struct nk_context *ctx, disk_list_state_t* state, int width)
+{
+    const int show_items = state->disk_count;
+    if (show_items == 0) {
+        ui_statusbar_print("No disk found!\n");
+    }
 
     struct nk_vec2 size = nk_vec2(width, winHeight);
 
@@ -30,7 +34,12 @@ int ui_combo_disk(struct nk_context *ctx, disk_list_state_t* state, int width) {
 
     disk_info_t* disks = state->disks;
 
-    if (nk_combo_begin_label(ctx, disks[state->selected_disk].label, size)) {
+    char label[DISK_LABEL_LEN];
+    disk_info_t* current_disk = disk_get_current(state);
+    snprintf(label, DISK_LABEL_LEN, "%s", current_disk->label);
+    label[0] = current_disk->has_staged_changes ? '*' : ' ';
+
+    if (nk_combo_begin_label(ctx, label, size)) {
         nk_layout_row_dynamic(ctx, (float)COMBO_HEIGHT, 1);
         for (i = 0; i < show_items; ++i) {
             disk_info_t* disk = &disks[i];

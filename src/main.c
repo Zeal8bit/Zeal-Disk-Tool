@@ -36,8 +36,6 @@ static struct nk_color get_partition_color(int i)
 }
 
 static void ui_draw_disk(struct nk_context *ctx, const disk_info_t *disk, int* selected_part) {
-    const uint64_t total_sectors = disk->size_bytes / DISK_SECTOR_SIZE;
-
     nk_layout_row_dynamic(ctx, 100, 1);
     struct nk_rect bounds = nk_widget_bounds(ctx);
     /* Prevent the window fom overflowing */
@@ -48,6 +46,11 @@ static void ui_draw_disk(struct nk_context *ctx, const disk_info_t *disk, int* s
 
     nk_fill_rect(canvas, bounds, 0, nk_rgb(220, 220, 220));
 
+    if (disk == NULL) {
+        return;
+    }
+
+    const uint64_t total_sectors = disk->size_bytes / DISK_SECTOR_SIZE;
     for (int i = 0; i < MAX_PART_COUNT; ++i) {
         const partition_t *p = &disk->staged_partitions[i];
         if (!p->active || p->size_sectors == 0)
@@ -216,9 +219,6 @@ static void ui_apply_handle(struct nk_context *ctx, disk_info_t* disk)
                 if (error_str) {
                     result_info.msg = error_str;
                     printf("%s\n", error_str);
-                } else {
-                    /* Success! Remove the pending changes mark */
-                    disk->label[0] = ' ';
                 }
                 popup_close(POPUP_APPLY);
                 popup_open(POPUP_MBR, 300, 140, &result_info);
@@ -244,8 +244,6 @@ static void ui_cancel_handle(struct nk_context *ctx, disk_info_t* disk)
             nk_layout_row_dynamic(ctx, 30, 2);
             if (nk_button_label(ctx, "Yes")) {
                 disk_revert_changes(disk);
-                /* Remove the symbol showing pending changes */
-                disk->label[0] = ' ';
                 popup_close(POPUP_CANCEL);
             } else if (nk_button_label(ctx, "No")) {
                 popup_close(POPUP_CANCEL);
@@ -322,8 +320,6 @@ static void ui_new_partition(struct nk_context *ctx, disk_info_t* disk)
         if (valid_entries != -1 && nk_button_label(ctx, "Create")) {
             /* The user clicked on `Create`, allocate a new ZealFS partition */
             disk_allocate_partition(disk, largest_free_lba_addr, *selected);
-            /* Show in the disk list that some changes are pending for the disk */
-            disk->label[0] = '*';
             popup_close(POPUP_NEWPART);
         }
         if (nk_button_label(ctx, "Cancel")) {
@@ -471,9 +467,9 @@ int main(void) {
         ui_cancel_handle(ctx, current_disk);
         ui_new_partition(ctx, current_disk);
 
-        /* Make the menubar always on top */
+        /* Make the menubar always on top, returns non-zero if we must close the window */
         if (ui_menubar_show(ctx, state, winWidth)) {
-            CloseWindow();
+            break;
         }
 
         /* Show the status bar */
