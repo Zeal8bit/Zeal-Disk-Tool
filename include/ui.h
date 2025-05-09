@@ -1,3 +1,10 @@
+/**
+ * SPDX-FileCopyrightText: 2025 Zeal 8-bit Computer <contact@zeal8bit.com>
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+#pragma once
+
 #include "disk.h"
 #include "nuklear.h"
 #include "raylib-nuklear.h"
@@ -23,4 +30,4 @@
 extern int winWidth, winHeight;
 
 int message_box(struct nk_context *ctx, const char* message);
-int ui_combo_disk(struct nk_context *ctx, int selected, disk_info_t *disks, int disk_count, int width);
+int ui_combo_disk(struct nk_context *ctx, disk_list_state_t* state, int width);

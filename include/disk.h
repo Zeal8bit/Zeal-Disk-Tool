@@ -63,14 +63,27 @@ typedef struct {
 } disk_info_t;
 
 
-extern disk_info_t disks[MAX_DISKS];
-extern int disk_count;
-extern int selected_disk;
+/**
+ * @brief Type for the disks list state
+ */
+typedef struct {
+    disk_info_t disks[MAX_DISKS];
+    int disk_count;
+    int selected_disk; /* Index of the selected disk */
+    int selected_partition;
 
-static inline disk_info_t* disk_get_current(void)
+    /* View related */
+    int selected_new_part_opt;
+} disk_list_state_t;
+
+extern disk_list_state_t disk_view_state;
+
+static inline disk_info_t* disk_get_current(disk_list_state_t* state)
 {
-    return (disk_count > 0) ? &disks[selected_disk] : NULL;
+    return (state->disk_count > 0) ? &state->disks[state->selected_disk] : NULL;
 }
+
+disk_list_state_t* disk_get_state(void);
 
 disk_err_t disks_refresh(void);
 

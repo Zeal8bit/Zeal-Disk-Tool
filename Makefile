@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-COMMON_SRCS=src/main.c src/disk.c src/ui/popup.c src/ui/combo_disk.c src/ui/message_box.c
+COMMON_SRCS=src/main.c src/disk.c src/ui/popup.c src/ui/combo_disk.c src/ui/message_box.c src/ui/menubar.c src/ui/statusbar.c
 
 CC=gcc
 CFLAGS=-O2 -g -Wall -Iinclude -Iraylib/linux/include -Lraylib/linux/lib

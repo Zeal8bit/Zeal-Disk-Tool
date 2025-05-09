@@ -8,33 +8,60 @@
 #include <stdlib.h>
 #include <assert.h>
 #include "disk.h"
+#include "ui/statusbar.h"
 #include "zealfs_v2.h"
 
 
-disk_info_t disks[MAX_DISKS];
-int disk_count = 0;
-int selected_disk = 0;
+static disk_list_state_t s_state;
+
+disk_list_state_t* disk_get_state(void)
+{
+    return &s_state;
+}
+
 
 disk_err_t disks_refresh(void)
 {
-    disk_err_t err = disk_list(disks, MAX_DISKS, &disk_count);
+    disk_err_t err = disk_list(s_state.disks, MAX_DISKS, &s_state.disk_count);
     if(err != ERR_SUCCESS) return err;
 
+    s_state.selected_disk = -1;
+
     /* Construct the labels for the disks */
-    for (int i = 0; i < disk_count; ++i) {
+    for (int i = 0; i < s_state.disk_count; ++i) {
         char size_str[128];
-        disk_get_size_str(disks[i].size_bytes, size_str, sizeof(size_str));
+        disk_info_t* disk = &s_state.disks[i];
+        disk_get_size_str(disk->size_bytes, size_str, sizeof(size_str));
         /* Keep the first character empty, it will be a `*` in case there is any pending change */
-        snprintf(disks[i].label, DISK_LABEL_LEN, " %.*s (%s)", (int) sizeof(disks[i].name), disks[i].name, size_str);
-        printf("[DISK] Refreshed disk: %s\n", disks[i].label);
-        disk_parse_mbr_partitions(&disks[i]);
+        snprintf(disk->label, DISK_LABEL_LEN, " %.*s (%s)", (int) sizeof(disk->name), disk->name, size_str);
+        printf("[DISK] Refreshed disk: %s\n", disk->label);
+        disk_parse_mbr_partitions(disk);
+
+        /* Check for a default disk */
+        if (s_state.selected_disk == -1 && disk->valid) {
+            s_state.selected_disk = i;
+        }
     }
 
-    // if (disk_count == 0) {
-    //     disks[0].label = "No disk found";
-    // }
+    if (s_state.disk_count == 0) {
+        ui_statusbar_print("No disk found!\n");
+    } else {
+        ui_statusbar_print("Disk list refreshed successfully\n");
+    }
 
     return ERR_SUCCESS;
+}
+
+static int disk_is_invalid(disk_info_t* disk)
+{
+    if (disk == NULL || !disk->valid) {
+        ui_statusbar_printf("Invalid disk %s", disk->name);
+        return true;
+    } else if (!disk->has_mbr) {
+        ui_statusbar_printf("Disk %s has no MBR!", disk->name);
+        return true;
+    }
+    return false;
 }
 
 static int disk_find_free_partition(disk_info_t* disk)
@@ -76,6 +103,9 @@ static void disk_write_mbr_entry(uint8_t *entry, const partition_t *part)
 
 void disk_allocate_partition(disk_info_t *disk, uint32_t lba, int size_idx)
 {
+    if (disk_is_invalid(disk)) {
+        return;
+    }
     /* Calculate the size in sector size */
     const uint64_t part_size_bytes = 1ULL << (16ULL + size_idx);
     const uint32_t size_sector = part_size_bytes / DISK_SECTOR_SIZE;
@@ -112,6 +142,9 @@ void disk_allocate_partition(disk_info_t *disk, uint32_t lba, int size_idx)
     zealfsv2_format(part->data, part_size_bytes);
     printf("[DISK] Partition %d data: %p, length: %d\n", disk->free_part_idx, part->data, part->data_len);
 
+    /* Inform the user about the operation */
+    ui_statusbar_printf("Partition %d allocated", disk->free_part_idx);
+
     /* Reuse the free partition index */
     disk->free_part_idx = disk_find_free_partition(disk);
 }
@@ -119,6 +152,9 @@ void disk_allocate_partition(disk_info_t *disk, uint32_t lba, int size_idx)
 
 const char* disk_format_partition(disk_info_t* disk, int partition)
 {
+    if (disk_is_invalid(disk)) {
+        return "Please select a valid disk!";
+    }
     if (partition < 0 || partition >= MAX_PART_COUNT || !disk->staged_partitions[partition].active) {
         return "Please select a valid partition!";
     }
@@ -143,13 +179,16 @@ const char* disk_format_partition(disk_info_t* disk, int partition)
     }
     zealfsv2_format(part->data, part_size_bytes);
     printf("[DISK][FORMAT] Partition %d data: %p, length: %d\n", disk->free_part_idx, part->data, part->data_len);
+
+    ui_statusbar_printf("Partition %d formatted successfully", partition);
+
     return NULL;
 }
 
 
 void disk_delete_partition(disk_info_t* disk, int partition)
 {
-    if (partition < 0 || partition >= MAX_PART_COUNT) {
+    if (disk_is_invalid(disk) || partition < 0 || partition >= MAX_PART_COUNT) {
         return;
     }
 
@@ -165,6 +204,8 @@ void disk_delete_partition(disk_info_t* disk, int partition)
         if (disk->free_part_idx == -1) {
             disk->free_part_idx = partition;
         }
+
+        ui_statusbar_printf("Partition %d deleted", partition);
     }
 }
 
@@ -184,7 +225,7 @@ void disk_revert_changes(disk_info_t* disk)
 {
     /* Cancel all the changes made to the disk */
     if (!disk->has_staged_changes) {
-        /* No changes made */
+        ui_statusbar_print("No changes on this disk");
         return;
     }
 
@@ -197,17 +238,22 @@ void disk_revert_changes(disk_info_t* disk)
     memcpy(disk->staged_partitions, disk->partitions, sizeof(disk->partitions));
     /* Make sure to call the function AFTER restoring the stages partitions */
     disk->free_part_idx = disk_find_free_partition(disk);
+    ui_statusbar_print("Changes reverted");
 }
 
 
 void disk_apply_changes(disk_info_t* disk)
 {
+    if (disk_is_invalid(disk)) {
+        return;
+    }
     disk->has_staged_changes = false;
     /* Before copying the staged partitions as the real partitions, make sure to
      * free the pointers and sizes (since they have been copied to the disk) */
     disk_free_staged_partitions_data(disk);
     memcpy(disk->mbr, disk->staged_mbr, sizeof(disk->mbr));
     memcpy(disk->partitions, disk->staged_partitions, sizeof(disk->partitions));
+    ui_statusbar_print("Changes saved to disk!");
 }
 
 

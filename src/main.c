@@ -15,12 +15,11 @@
 
 #include "ui.h"
 #include "ui/popup.h"
+#include "ui/menubar.h"
+#include "ui/statusbar.h"
 
-#define MENUBAR_HEIGHT  30
 
 static struct nk_context *ctx;
-static int new_partition_choosen_option;
-static int selected_partition;
 
 int winWidth, winHeight;
 
@@ -41,6 +40,9 @@ static void ui_draw_disk(struct nk_context *ctx, const disk_info_t *disk, int* s
 
     nk_layout_row_dynamic(ctx, 100, 1);
     struct nk_rect bounds = nk_widget_bounds(ctx);
+    /* Prevent the window fom overflowing */
+    bounds.w *= 0.99;
+
     float full_width = bounds.w;
     struct nk_command_buffer *canvas = nk_window_get_canvas(ctx);
 
@@ -95,7 +97,7 @@ static void ui_draw_disk(struct nk_context *ctx, const disk_info_t *disk, int* s
         0.20f,  // File System
         0.15f,  // Start address
         0.15f,  // Size
-        0.41f,  // Padding
+        0.25f,  // Padding
     };
 
     // Draw table header
@@ -332,66 +334,6 @@ static void ui_new_partition(struct nk_context *ctx, disk_info_t* disk)
 }
 
 
-static void ui_menubar(struct nk_context *ctx)
-{
-    static popup_info_t info;
-    disk_info_t* current_disk = disk_get_current();
-
-    if (nk_begin(ctx, "Menu", nk_rect(0, 0, winWidth, MENUBAR_HEIGHT), NK_WINDOW_NO_SCROLLBAR)) {
-        nk_menubar_begin(ctx);
-
-        const float ratios[] = { 0.04f, 0.07f, 0.04f };
-        nk_layout_row(ctx, NK_DYNAMIC, 25, 3, ratios);
-
-        if (nk_menu_begin_label(ctx, "File", NK_TEXT_LEFT, nk_vec2(130, 200))) {
-            nk_layout_row_dynamic(ctx, 25, 1);
-            if (nk_menu_item_label(ctx, "Refresh devices", NK_TEXT_LEFT)) {
-                disks_refresh();
-            } else if (nk_menu_item_label(ctx, "Apply changes", NK_TEXT_LEFT) && current_disk != NULL && current_disk->has_staged_changes) {
-                popup_open(POPUP_APPLY, 300, 130, NULL);
-            } else if (nk_menu_item_label(ctx, "Cancel changes", NK_TEXT_LEFT) && current_disk != NULL && current_disk->has_staged_changes) {
-                popup_open(POPUP_CANCEL, 300, 130, NULL);
-            } else if (nk_menu_item_label(ctx, "Quit", NK_TEXT_LEFT)) {
-                CloseWindow();
-            }
-            nk_menu_end(ctx);
-        }
-
-        if (nk_menu_begin_label(ctx, "Partition", NK_TEXT_LEFT, nk_vec2(100, 200))) {
-            nk_layout_row_dynamic(ctx, 25, 1);
-             if (nk_menu_item_label(ctx, "Create MBR", NK_TEXT_LEFT) && current_disk != NULL) {
-                // popup_open(POPUP_MBR, 300, 140, &info);
-            } else if (nk_menu_item_label(ctx, "New", NK_TEXT_LEFT) && current_disk != NULL) {
-                popup_open(POPUP_NEWPART, 300, 300, &new_partition_choosen_option);
-            } else if (nk_menu_item_label(ctx, "Delete", NK_TEXT_LEFT) && current_disk != NULL) {
-                disk_delete_partition(current_disk, selected_partition);
-            } else if (nk_menu_item_label(ctx, "Format", NK_TEXT_LEFT)) {
-                const char* error = disk_format_partition(current_disk, selected_partition);
-                info.title = "Format partition";
-                info.msg = error ? error : "Success!";
-                popup_open(POPUP_MBR, 300, 140, &info);
-            }
-            nk_menu_end(ctx);
-        }
-
-        if (nk_menu_begin_label(ctx, "Help", NK_TEXT_LEFT, nk_vec2(100, 200))) {
-            nk_layout_row_dynamic(ctx, 25, 1);
-            if (nk_menu_item_label(ctx, "About", NK_TEXT_LEFT)) {
-                info = (popup_info_t) {
-                    .title = "About",
-                    .msg = "Zeal Disk Tool\nCreate ZealFS v2 partitions for disks!",
-                };
-                popup_open(POPUP_MBR, 300, 140, &info);
-            }
-            nk_menu_end(ctx);
-        }
-
-        nk_menubar_end(ctx);
-    }
-    nk_end(ctx);
-}
-
-
 static void setup_window() {
     InitWindow(0, 0, "Zeal Disk Tool " VERSION);
 
@@ -442,16 +384,22 @@ int main(void) {
     Font font = LoadFontFromNuklear(fontSize);
     ctx = InitNuklearEx(font, fontSize);
 
+    ui_statusbar_print("Ready!");
+
     while (!WindowShouldClose()) {
         UpdateNuklear(ctx);
 
         /* If any popup is opened, the main window must not be focusable */
         const int flags = popup_any_opened() ? NK_WINDOW_NO_INPUT : 0;
-        disk_info_t* current_disk = disk_get_current();
+        disk_list_state_t* state = disk_get_state();
+        disk_info_t* current_disk = disk_get_current(state);
 
         nk_style_push_style_item(ctx, &ctx->style.window.fixed_background,
                                 nk_style_item_color(nk_rgb(0x39, 0x39, 0x39)));
-        if (nk_begin(ctx, "Disks", nk_rect(0, MENUBAR_HEIGHT, winWidth, winHeight), flags)) {
+
+        const int disk_view_height = winHeight - MENUBAR_HEIGHT - ui_statusbar_height(ctx);
+        const int disk_view_width = winWidth;
+        if (nk_begin(ctx, "Disks", nk_rect(0, MENUBAR_HEIGHT, disk_view_width, disk_view_height), flags)) {
 
             /* Create the top row with the buttons and the disk selection */
             const float ratio[] = { 0.10f, 0.15f, 0.15f, 0.07f, 0.07f, 0.15f, 0.3f };
@@ -462,64 +410,57 @@ int main(void) {
                 nk_tooltip(ctx, "Create an MBR on the disk");
             }
             /* Only enable the buttons if we have at least one disk */
-            if (nk_button_label(ctx, "Create MBR") && current_disk != NULL) {
-                static popup_info_t info;
-                info.title = "Create MBR table";
-                if (current_disk->has_mbr) {
-                    info.msg = "Selected disk already has an MBR";
-                } else {
-                    info.msg = "Feature not supported yet";
-                    // mbr_last_msg = "MBR created successfully!";
-                }
-                popup_open(POPUP_MBR, 300, 140, &info);
+            if (nk_button_label(ctx, "Create MBR")) {
+                ui_menubar_create_mbr(ctx, current_disk);
             }
 
             /* Create the button to add a new partition */
             if (nk_widget_is_hovered(ctx)) {
                 nk_tooltip(ctx, "Create a new partition on the disk");
             }
-            if (nk_button_label(ctx, "New partition") && disk_count > 0) {
-                popup_open(POPUP_NEWPART, 300, 300, &new_partition_choosen_option);
+            if (nk_button_label(ctx, "New partition")) {
+                ui_menubar_new_partition(ctx, current_disk, &state->selected_new_part_opt);
             }
 
             /* Create the button to delete a partition */
             if (nk_widget_is_hovered(ctx)) {
                 nk_tooltip(ctx, "Delete the selected partition on the disk");
             }
-            if ((nk_button_label(ctx, "Delete partition") || IsKeyPressed(KEY_DELETE)) && disk_count > 0) {
-                disk_delete_partition(current_disk, selected_partition);
+            if ((nk_button_label(ctx, "Delete partition") || IsKeyPressed(KEY_DELETE))) {
+                ui_menubar_delete_partition(ctx, current_disk, state->selected_partition);
             }
 
             /* Create the button to commit the changes */
             if (nk_widget_is_hovered(ctx)) {
                 nk_tooltip(ctx, "Apply all the changes to the selected disk");
             }
-            if (nk_button_label(ctx, "Apply") && disk_count > 0 && current_disk->has_staged_changes) {
-                popup_open(POPUP_APPLY, 300, 130, NULL);
+            if (nk_button_label(ctx, "Apply")) {
+                ui_menubar_apply_changes(ctx, current_disk);
             }
+
             if (nk_widget_is_hovered(ctx)) {
                 nk_tooltip(ctx, "Cancel all the changes to the selected disk");
             }
-            if (nk_button_label(ctx, "Cancel") && disk_count > 0) {
-                popup_open(POPUP_CANCEL, 300, 130, NULL);
+            if (nk_button_label(ctx, "Cancel")) {
+                ui_menubar_cancel_changes(ctx, current_disk);
             }
 
             nk_label(ctx, "Select a disk:", NK_TEXT_RIGHT);
             float combo_width = nk_widget_width(ctx);
 
-            int new_selection = ui_combo_disk(ctx, selected_disk, disks, disk_count, combo_width);
-            if (new_selection != selected_disk) {
+            int new_selection = ui_combo_disk(ctx, state, combo_width);
+            if (new_selection != state->selected_disk) {
                 if (current_disk->has_staged_changes) {
                     static popup_info_t info = {
                         .title = "Cannot switch disk",
                         .msg = "The selected disk has unsaved changes. Please apply or discard them before switching disks."};
                     popup_open(POPUP_MBR, 300, 140, &info);
                 } else {
-                    selected_disk = new_selection;
+                    state->selected_disk = new_selection;
                 }
             }
 
-            ui_draw_disk(ctx, current_disk, &selected_partition);
+            ui_draw_disk(ctx, current_disk, &state->selected_partition);
         }
         nk_end(ctx);
         nk_style_pop_style_item(ctx);
@@ -531,7 +472,12 @@ int main(void) {
         ui_new_partition(ctx, current_disk);
 
         /* Make the menubar always on top */
-        ui_menubar(ctx);
+        if (ui_menubar_show(ctx, state, winWidth)) {
+            CloseWindow();
+        }
+
+        /* Show the status bar */
+        ui_statusbar_show(ctx, winWidth, winHeight);
 
         BeginDrawing();
             ClearBackground(WHITE);
