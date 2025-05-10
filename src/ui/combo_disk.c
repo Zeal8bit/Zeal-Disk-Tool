@@ -49,7 +49,7 @@ int ui_combo_disk(struct nk_context *ctx, disk_list_state_t* state, int width)
                     nk_style_push_color(ctx, &ctx->style.contextual_button.text_normal, nk_rgb(0,127,127));
                     char label[DISK_LABEL_LEN];
                     snprintf(label, DISK_LABEL_LEN, "%s", disk->label);
-                    label[0] = disk->has_staged_changes ? '*' : ' ';
+                    label[0] = '>';
                     nk_combo_item_label(ctx, label, NK_TEXT_LEFT);
                     nk_style_pop_color(ctx);
                 } else if (nk_combo_item_label(ctx, disk->label, NK_TEXT_LEFT)) {
