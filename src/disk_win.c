@@ -18,7 +18,6 @@ disk_err_t disk_list(disk_info_t* out_disks, int max_disks, int* out_count) {
         if (hDisk == INVALID_HANDLE_VALUE) {
             DWORD error = GetLastError();
             if (error == ERROR_ACCESS_DENIED) {
-                printf("Program must be run as Administrator!\n");
                 return ERR_NOT_ADMIN;
             }
             continue;
@@ -123,4 +122,83 @@ const char* disk_write_changes(disk_info_t* disk)
 error:
     CloseHandle(fd);
     return error_msg;
+}
+
+
+int disk_open(disk_info_t* disk, void** ret_fd)
+{
+    assert(disk);
+    assert(ret_fd);
+
+    HANDLE fd = CreateFileA(disk->path,
+                            GENERIC_READ | GENERIC_WRITE,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE,
+                            NULL, OPEN_EXISTING, 0, NULL);
+    if (fd == INVALID_HANDLE_VALUE) {
+        return 1;
+    }
+
+    *ret_fd = fd;
+    return 0;
+}
+
+
+ssize_t disk_read(void* disk_fd, void* buffer, off_t disk_offset, uint32_t len)
+{
+    HANDLE handle = (HANDLE) disk_fd;
+    DWORD bytes_read;
+    BOOL success;
+
+    assert(handle != INVALID_HANDLE_VALUE);
+    assert(buffer);
+    assert(len > 0);
+
+    LARGE_INTEGER li_offset = {
+        .QuadPart = disk_offset,
+    };
+    if (!SetFilePointerEx(handle, li_offset, NULL, FILE_BEGIN)) {
+        return -1;
+    }
+
+    success = ReadFile(handle, buffer, (DWORD)len, &bytes_read, NULL);
+
+    if (!success || bytes_read != len) {
+        return -2;
+    }
+
+    return bytes_read;
+}
+
+
+ssize_t disk_write(void* disk_fd, const void* buffer, off_t disk_offset, uint32_t len)
+{
+    DWORD bytes_written;
+    HANDLE handle = (HANDLE) disk_fd;
+    assert(handle != INVALID_HANDLE_VALUE);
+    assert(buffer);
+    assert(len > 0);
+
+    LARGE_INTEGER li_offset = {
+        .QuadPart = disk_offset
+    };
+    if (!SetFilePointerEx(handle, li_offset, NULL, FILE_BEGIN)) {
+        return -1;
+    }
+
+    BOOL success = WriteFile(handle, buffer, (DWORD)len, &bytes_written, NULL);
+
+    if (!success || bytes_written != len) {
+        return -2;
+    }
+
+    return bytes_written;
+}
+
+
+void disk_close(void* disk_fd)
+{
+    HANDLE handle = (HANDLE) disk_fd;
+    if (handle != INVALID_HANDLE_VALUE) {
+        CloseHandle(handle);
+    }
 }

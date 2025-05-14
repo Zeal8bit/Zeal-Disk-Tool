@@ -21,6 +21,8 @@ int ui_menubar_show(struct nk_context *ctx, disk_list_state_t* state, int width)
 
 void ui_menubar_create_mbr(struct nk_context *ctx, disk_info_t* disk);
 
+void ui_menubar_load_image(struct nk_context *ctx, disk_list_state_t* state);
+
 void ui_menubar_new_partition(struct nk_context *ctx, disk_info_t* disk, int *choose_option);
 
 void ui_menubar_delete_partition(struct nk_context *ctx, disk_info_t* disk, int partition);

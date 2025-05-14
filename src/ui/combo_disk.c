@@ -6,11 +6,13 @@
 #include "raylib.h"
 #include "ui.h"
 #include "ui/statusbar.h"
+#include "ui/menubar.h"
 
 int ui_combo_disk(struct nk_context *ctx, disk_list_state_t* state, int width)
 {
-    const int show_items = state->disk_count;
-    if (show_items == 0) {
+    /* Add one for the last "open image" option */
+    const int show_items = state->disk_count + 1;
+    if (state->disk_count == 0) {
         ui_statusbar_print("No disk found!\n");
     }
 
@@ -23,8 +25,6 @@ int ui_combo_disk(struct nk_context *ctx, disk_list_state_t* state, int width)
 
     assert(ctx);
     assert(ctx->current);
-    if (!ctx || !state->disks || !show_items)
-        return state->selected_disk;
 
     item_spacing = ctx->style.window.spacing;
     window_padding = ctx->style.window.combo_padding;
@@ -41,7 +41,7 @@ int ui_combo_disk(struct nk_context *ctx, disk_list_state_t* state, int width)
 
     if (nk_combo_begin_label(ctx, label, size)) {
         nk_layout_row_dynamic(ctx, (float)COMBO_HEIGHT, 1);
-        for (i = 0; i < show_items; ++i) {
+        for (i = 0; i < state->disk_count; ++i) {
             disk_info_t* disk = &disks[i];
 
             if(disk->valid) {
@@ -53,7 +53,7 @@ int ui_combo_disk(struct nk_context *ctx, disk_list_state_t* state, int width)
                     nk_combo_item_label(ctx, label, NK_TEXT_LEFT);
                     nk_style_pop_color(ctx);
                 } else if (nk_combo_item_label(ctx, disk->label, NK_TEXT_LEFT)) {
-                        state->selected_disk = i;
+                    state->selected_disk = i;
                 }
             } else {
                 nk_style_push_color(ctx, &ctx->style.text.color, nk_rgb(255,87,51));
@@ -61,6 +61,11 @@ int ui_combo_disk(struct nk_context *ctx, disk_list_state_t* state, int width)
                 nk_style_pop_color(ctx);
             }
         }
+
+        if (nk_combo_item_label(ctx, "Open image file...", NK_TEXT_LEFT)) {
+            ui_menubar_load_image(ctx, state);
+        }
+
         nk_combo_end(ctx);
     }
     return state->selected_disk;

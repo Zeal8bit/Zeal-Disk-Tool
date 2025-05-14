@@ -64,6 +64,23 @@ void ui_menubar_cancel_changes(struct nk_context *ctx, disk_info_t* disk)
 }
 
 
+void ui_menubar_load_image(struct nk_context *ctx, disk_list_state_t* state)
+{
+    disk_info_t* current_disk = disk_get_current(state);
+    /* Make the newly opened image the current disk only if it is valid AND teh current disk has no changes */
+    int new_disk_idx = disk_open_image_file(state);
+    if (new_disk_idx >= 0 && !current_disk->has_staged_changes && state->disks[new_disk_idx].valid) {
+        state->selected_disk = new_disk_idx;
+    }
+}
+
+
+void ui_menubar_new_image(struct nk_context *ctx, disk_list_state_t* state)
+{
+    popup_open(POPUP_NEWIMG, 300, 300, state);
+}
+
+
 int ui_menubar_show(struct nk_context *ctx, disk_list_state_t* state, int width)
 {
     int must_exit = 0;
@@ -78,6 +95,11 @@ int ui_menubar_show(struct nk_context *ctx, disk_list_state_t* state, int width)
 
         if (nk_menu_begin_label(ctx, "File", NK_TEXT_LEFT, nk_vec2(130, 200))) {
             nk_layout_row_dynamic(ctx, 25, 1);
+            if (nk_menu_item_label(ctx, "Open image...", NK_TEXT_LEFT)) {
+                ui_menubar_load_image(ctx, state);
+            } else if (nk_menu_item_label(ctx, "Create image...", NK_TEXT_LEFT)) {
+                ui_menubar_new_image(ctx, state);
+            }
             if (nk_menu_item_label(ctx, "Refresh devices", NK_TEXT_LEFT)) {
                 disks_refresh();
             } else if (nk_menu_item_label(ctx, "Apply changes", NK_TEXT_LEFT)) {

@@ -9,10 +9,20 @@
 #include <assert.h>
 #include "disk.h"
 #include "ui/statusbar.h"
+#include "ui/tinyfiledialogs.h"
 #include "zealfs_v2.h"
 
 
 static disk_list_state_t s_state;
+
+static void disk_generate_label(disk_info_t* disk)
+{
+    char size_str[128];
+    disk_get_size_str(disk->size_bytes, size_str, sizeof(size_str));
+    /* Keep the first character empty, it will be a `*` in case there is any pending change */
+    snprintf(disk->label, DISK_LABEL_LEN, " %.*s (%s)", (int) sizeof(disk->name), disk->name, size_str);
+}
+
 
 disk_list_state_t* disk_get_state(void)
 {
@@ -22,18 +32,34 @@ disk_list_state_t* disk_get_state(void)
 
 disk_err_t disks_refresh(void)
 {
+    /* Check if the current disk has unstaged changes */
+    disk_info_t* current = disk_get_current(&s_state);
+    if (current && current->has_staged_changes) {
+        ui_statusbar_print("Cannot refresh: unstaged changes detected!");
+        return ERR_INVALID;
+    }
+
+    /* Backup the loaded disk images */
+    disk_info_t backup_images[MAX_DISKS];
+    int backup_count = 0;
+    for (int i = 0; i < s_state.disk_count; ++i) {
+        if (s_state.disks[i].is_image) {
+            backup_images[backup_count++] = s_state.disks[i];
+        }
+    }
+
+    /* Refresh the disk list */
     disk_err_t err = disk_list(s_state.disks, MAX_DISKS, &s_state.disk_count);
-    if(err != ERR_SUCCESS) return err;
+    if(err != ERR_SUCCESS) {
+        return err;
+    }
 
     s_state.selected_disk = -1;
 
     /* Construct the labels for the disks */
     for (int i = 0; i < s_state.disk_count; ++i) {
-        char size_str[128];
         disk_info_t* disk = &s_state.disks[i];
-        disk_get_size_str(disk->size_bytes, size_str, sizeof(size_str));
-        /* Keep the first character empty, it will be a `*` in case there is any pending change */
-        snprintf(disk->label, DISK_LABEL_LEN, " %.*s (%s)", (int) sizeof(disk->name), disk->name, size_str);
+        disk_generate_label(disk);
         printf("[DISK] Refreshed disk: %s\n", disk->label);
         disk_parse_mbr_partitions(disk);
 
@@ -43,15 +69,25 @@ disk_err_t disks_refresh(void)
         }
     }
 
+    /* Restore the saved loaded images at the end of the disk array */
+    for (int i = 0; i < backup_count; ++i) {
+        if (s_state.disk_count >= MAX_DISKS) {
+            printf("[DISK] Maximum number of disks reached while restoring images!");
+            break;
+        }
+        printf("[DISK] Refreshed image: %s\n", backup_images[i].label);
+        s_state.disks[s_state.disk_count++] = backup_images[i];
+    }
+
     if (s_state.disk_count == 0) {
         ui_statusbar_print("No disk found!\n");
-        s_state.selected_disk = 0;
     } else {
         ui_statusbar_print("Disk list refreshed successfully\n");
     }
 
     return ERR_SUCCESS;
 }
+
 
 static int disk_is_invalid(disk_info_t* disk)
 {
@@ -407,7 +443,7 @@ static uint64_t align_lba_address(uint32_t lba_start_address, uint32_t alignment
 }
 
 
-const char* const *disk_get_partition_size_list(void)
+const char* const *disk_get_partition_size_list(int* count)
 {
     static const char* const sizes[] = {
         "64KiB", "128KiB", "256KiB", "512KiB",
@@ -415,7 +451,24 @@ const char* const *disk_get_partition_size_list(void)
         "16MiB", "32MiB", "64MiB", "128MiB", "256MiB", "512MiB",
         "1GiB", "2GiB", "4GiB"
     };
+    if (count) {
+        *count = DIM(sizes);
+    }
     return sizes;
+}
+
+uint64_t disk_get_size_of_idx(int index)
+{
+    const uint64_t sizes[] = {
+        64*KB, 128*KB, 256*KB, 512*KB, 1*MB, 2*MB, 4*MB, 8*MB,
+        16*MB, 32*MB, 64*MB, 128*MB, 256*MB, 512*MB,
+        1*GB, 2*GB, 4*GB
+    };
+
+    if (index < 0 || index >= DIM(sizes)) {
+        return 0;
+    }
+    return sizes[index];
 }
 
 
@@ -457,5 +510,172 @@ int disk_valid_partition_size(disk_info_t *disk, uint32_t *largest_free_lba)
     }
 
     return -1;
+}
+
+
+static bool disk_image_opened(disk_list_state_t* state, const char* path, int* index)
+{
+    /* Check if the image is already opened */
+    for (int i = 0; i < state->disk_count; i++) {
+        disk_info_t* disk = &state->disks[i];
+        if (disk->is_image && strcmp(disk->path, path) == 0) {
+            if (index) {
+                *index = i;
+            }
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+
+static const char* disk_get_basename(const char* path)
+{
+    const char* last_slash = NULL;
+    #ifdef _WIN32
+        last_slash = strrchr(path, '\\');
+    #else
+        last_slash = strrchr(path, '/');
+    #endif
+
+    return last_slash ? last_slash : path;
+}
+
+
+int disk_open_image_file(disk_list_state_t* state)
+{
+    if (state->disk_count >= MAX_DISKS) {
+        ui_statusbar_print("Maximum number of disks reached!");
+        return -1;
+    }
+
+    const char* filter_patterns[] = { "*.img" };
+    const char* file_path = tinyfd_openFileDialog(
+        "Open Disk Image",
+        "",
+        1,
+        filter_patterns,
+        "Disk Image Files",
+        0
+    );
+
+    if (!file_path) {
+        ui_statusbar_print("No file selected");
+        return -1;
+    }
+
+    /* Check if the image is already opened */
+    int index = 0;
+    if (disk_image_opened(state, file_path, &index)) {
+        ui_statusbar_print("Image is already opened!");
+        return index;
+    }
+
+    FILE* file = fopen(file_path, "rb");
+    if (!file) {
+        ui_statusbar_printf("Failed to open file: %s", file_path);
+        return -1;
+    }
+
+    disk_info_t* disk = &state->disks[state->disk_count];
+    memset(disk, 0, sizeof(disk_info_t));
+    /* Get the size of the file by seeking to the end */
+    fseek(file, 0, SEEK_END);
+    disk->size_bytes = ftell(file);
+    rewind(file);
+
+    if (fread(disk->mbr, 1, sizeof(disk->mbr), file) != sizeof(disk->mbr)) {
+        ui_statusbar_printf("Failed to read MBR from file: %s", file_path);
+        fclose(file);
+        return -1;
+    }
+
+    fclose(file);
+    disk->valid = true;
+    disk->is_image = true;
+    disk->has_mbr = (disk->mbr[510] == 0x55 && disk->mbr[511] == 0xAA);
+    disk_parse_mbr_partitions(disk);
+
+    snprintf(disk->path, sizeof(disk->name), "%s", file_path);
+    /* Extract the filename out of the path */
+    const char* base_name = disk_get_basename(file_path);
+    snprintf(disk->name, sizeof(disk->name), "%s", base_name ? base_name + 1 : file_path);
+    /* Label depends on the name, so it must be done after setting the name */
+    disk_generate_label(disk);
+
+    state->disk_count++;
+    ui_statusbar_print("Disk image loaded successfully!");
+
+    return state->disk_count - 1;
+}
+
+
+int disk_create_image(disk_list_state_t* state, const char* path, uint64_t size)
+{
+    int new_index = state->disk_count;
+
+    if (new_index >= MAX_DISKS) {
+        ui_statusbar_print("Maximum number of disks reached!");
+        return -1;
+    }
+
+    /* Check if the image is already opened */
+    if (disk_image_opened(state, path, &new_index)) {
+        ui_statusbar_print("Image is already opened!");
+    }
+
+    FILE* file = fopen(path, "wb");
+    if (!file) {
+        ui_statusbar_printf("Failed to create file: %s", path);
+        return -1;
+    }
+
+    /* Allocate a buffer for the MBR and initialize it to 0 */
+    uint8_t mbr[DISK_SECTOR_SIZE] = {0};
+    /* Set the MBR signature */
+    mbr[510] = 0x55;
+    mbr[511] = 0xAA;
+
+    /* Write the MBR to the file */
+    if (fwrite(mbr, 1, DISK_SECTOR_SIZE, file) != DISK_SECTOR_SIZE) {
+        ui_statusbar_printf("Failed to write MBR to file: %s", path);
+        fclose(file);
+        return -1;
+    }
+
+    /* Extend the file to the desired size */
+    if (fseek(file, size - 1, SEEK_SET) != 0 || fwrite("", 1, 1, file) != 1) {
+        ui_statusbar_printf("Failed to set file size: %s", path);
+        fclose(file);
+        return -1;
+    }
+
+    fclose(file);
+
+    /* Add the new disk to the state */
+    disk_info_t* disk = &state->disks[new_index];
+    memset(disk, 0, sizeof(disk_info_t));
+    disk->size_bytes = size;
+    disk->valid = true;
+    disk->is_image = true;
+    disk->has_mbr = true;
+    memcpy(disk->mbr, mbr, sizeof(mbr));
+    disk_parse_mbr_partitions(disk);
+
+    snprintf(disk->path, sizeof(disk->path), "%s", path);
+    /* Extract the filename out of the path */
+    const char* base_name = disk_get_basename(path);
+    snprintf(disk->name, sizeof(disk->name), "%s", base_name ? base_name + 1 : path);
+    /* Label depends on the name, so it must be done after setting the name */
+    disk_generate_label(disk);
+
+    /* If the new file didn't replace any file, increment the total number of disks */
+    if (new_index == state->disk_count) {
+        state->disk_count++;
+    }
+    ui_statusbar_print("Disk image created successfully!");
+
+    return new_index;
 }
 

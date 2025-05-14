@@ -9,18 +9,20 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
+#define DIM(arr) (sizeof(arr) / sizeof(*(arr)))
 
 #define GB  (1073741824ULL)
 #define MB  (1048576ULL)
 #define KB  (1024ULL)
 #define MAX(a,b)    ((a) > (b) ? (a) : (b))
 
+#define ZEALFS_TYPE         0x5a
 
 #define MAX_DISKS           32
 #define MAX_DISK_SIZE       (32*GB)
 #define DISK_LABEL_LEN      512
 #define MAX_PART_COUNT      4
-#define DISK_SECTOR_SIZE    512
+#define DISK_SECTOR_SIZE    512UL
 
 #define MBR_PART_ENTRY_SIZE     16
 #define MBR_PART_ENTRY_BEGIN    0x1BE
@@ -52,6 +54,7 @@ typedef struct {
 
     uint64_t    size_bytes;
     bool        valid;
+    bool        is_image;
     /* Original MBR */
     bool        has_mbr;
     uint8_t     mbr[DISK_SECTOR_SIZE];
@@ -84,6 +87,17 @@ static inline disk_info_t* disk_get_current(disk_list_state_t* state)
     return (state->disk_count > 0) ? &state->disks[state->selected_disk] : NULL;
 }
 
+static inline int disk_is_valid_zealfs_partition(partition_t* part)
+{
+    return part != NULL && part->active && part->type == 0x5A;
+}
+
+/**
+ * ============================================================================
+ *                              PORTABLE CODE
+ * ============================================================================
+ */
+
 disk_list_state_t* disk_get_state(void);
 
 disk_err_t disks_refresh(void);
@@ -96,7 +110,9 @@ disk_err_t disk_list(disk_info_t* out_disks, int max_disks, int* out_count);
 
 void disk_parse_mbr_partitions(disk_info_t *disk);
 
-const char* const *disk_get_partition_size_list(void);
+const char* const *disk_get_partition_size_list(int* count);
+
+uint64_t disk_get_size_of_idx(int index);
 
 void disk_allocate_partition(disk_info_t *disk, uint32_t lba, int size_idx);
 
@@ -111,5 +127,69 @@ const char* disk_get_fs_type(uint8_t fs_byte);
 void disk_get_size_str(uint64_t size, char* buffer, int buffer_size);
 
 const char* disk_write_changes(disk_info_t* disk);
+
+/**
+ * @brief Prompts the user to choose a disk image file to add to the disk list.
+ *
+ * This function allows the user to select a disk image file, which is then added
+ * to the provided disk list state. It returns the index of the newly added disk
+ * on success or a negative value if an error occurs.
+ *
+ * @param state A pointer to the disk list state where the disk image will be added.
+ * @return int The index of the newly added disk on success, or a negative value on error.
+ */
+int disk_open_image_file(disk_list_state_t* state);
+
+int disk_create_image(disk_list_state_t* state, const char* path, uint64_t size);
+
+
+/**
+ * ============================================================================
+ *                              OS SPECIFIC CODE
+ * ============================================================================
+ */
+/**
+ * Opens a disk partition for reading and writing files to ZealFS partitions.
+ *
+ * @param disk A pointer to the disk_info_t structure containing information about the disk.
+ * @param ret_fd A pointer to a location where the abstract file descriptor will be stored on success.
+ *               This file descriptor will be used in subsequent operations.
+ * @return 0 on success, or a positive value indicating an error.
+ *         Logs errors if any occur.
+ */
+int disk_open(disk_info_t* disk, void** ret_fd);
+
+/**
+ * Reads data from a disk partition at a specified offset.
+ *
+ * @param disk_fd The abstract file descriptor of the disk, obtained from disk_open.
+ * @param buffer A pointer to the buffer where the read data will be stored.
+ * @param disk_offset The offset on the disk from where the read operation will start.
+ * @param len The number of bytes to read.
+ * @return The number of bytes read on success, or a negative value indicating an error.
+ *         Logs errors if any occur.
+ */
+ssize_t disk_read(void* disk_fd, void* buffer, off_t disk_offset, uint32_t len);
+
+/**
+ * Writes data to a disk partition at a specified offset.
+ *
+ * @param disk_fd The abstract file descriptor of the disk, obtained from disk_open.
+ * @param buffer A pointer to the buffer containing the data to be written.
+ * @param disk_offset The offset on the disk where the write operation will start.
+ * @param len The number of bytes to write.
+ * @return The number of bytes written on success, or a negative value indicating an error.
+ *         Logs errors if any occur.
+ */
+ssize_t disk_write(void* disk_fd, const void* buffer, off_t disk_offset, uint32_t len);
+
+/**
+ * Closes the disk partition and releases any associated resources.
+ *
+ * @param disk_fd The abstract file descriptor of the disk, obtained from disk_open.
+ *                After this call, the file descriptor is no longer valid.
+ *         Logs errors if any occur.
+ */
+void disk_close(void* disk_fd);
 
 #endif // DISK_H

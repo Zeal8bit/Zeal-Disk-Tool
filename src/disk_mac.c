@@ -25,9 +25,7 @@ static disk_err_t disk_try_open(const char* path, disk_info_t* info, int is_file
 
     int fd = open(path, O_RDONLY);
     if (fd < 0) {
-        if (errno == EACCES) {
-            return ERR_NOT_ADMIN;
-        }
+        fprintf(stderr, "[MAC] Skipping device %s: %s\n", path, strerror(errno));
         return ERR_INVALID;
     }
 
@@ -139,4 +137,45 @@ const char* disk_write_changes(disk_info_t* disk)
 error:
     close(fd);
     return error_msg;
+}
+
+
+int disk_open(const char* path, int flags) {
+    int fd = open(path, flags);
+    if (fd < 0) {
+        fprintf(stderr, "[DISK] Failed to open %s: %s\n", path, strerror(errno));
+    } else {
+        printf("[DISK] Opened %s with fd %d\n", path, fd);
+    }
+    return fd;
+}
+
+ssize_t disk_read(int fd, void* buffer, size_t size) {
+    ssize_t bytes_read = read(fd, buffer, size);
+    if (bytes_read < 0) {
+        fprintf(stderr, "[DISK] Failed to read from fd %d: %s\n", fd, strerror(errno));
+    } else {
+        printf("[DISK] Read %zd bytes from fd %d\n", bytes_read, fd);
+    }
+    return bytes_read;
+}
+
+ssize_t disk_write(int fd, const void* buffer, size_t size) {
+    ssize_t bytes_written = write(fd, buffer, size);
+    if (bytes_written < 0) {
+        fprintf(stderr, "[DISK] Failed to write to fd %d: %s\n", fd, strerror(errno));
+    } else {
+        printf("[DISK] Wrote %zd bytes to fd %d\n", bytes_written, fd);
+    }
+    return bytes_written;
+}
+
+int disk_close(int fd) {
+    int result = close(fd);
+    if (result < 0) {
+        fprintf(stderr, "[DISK] Failed to close fd %d: %s\n", fd, strerror(errno));
+    } else {
+        printf("[DISK] Closed fd %d\n", fd);
+    }
+    return result;
 }

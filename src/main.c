@@ -17,7 +17,8 @@
 #include "ui/popup.h"
 #include "ui/menubar.h"
 #include "ui/statusbar.h"
-
+#include "ui/partition_viewer.h"
+#include "ui/tinyfiledialogs.h"
 
 static struct nk_context *ctx;
 
@@ -35,6 +36,29 @@ static struct nk_color get_partition_color(int i)
     }
 }
 
+
+static void draw_dashed_rect(struct nk_context *ctx, struct nk_rect rect,
+                             struct nk_color color, float thickness,
+                             float dash_length, float space_length) {
+    struct nk_command_buffer *canvas = nk_window_get_canvas(ctx);
+
+    float x0 = rect.x;
+    float y0 = rect.y;
+    float x1 = rect.x + rect.w;
+    float y1 = rect.y + rect.h;
+    for (float x = x0; x < x1; x += dash_length + space_length) {
+        float end = NK_MIN(x + dash_length, x1);
+        nk_stroke_line(canvas, x, y0, end, y0, thickness, color); // top
+        nk_stroke_line(canvas, x, y1, end, y1, thickness, color); // bottom
+    }
+    for (float y = y0; y < y1; y += dash_length + space_length) {
+        float end = NK_MIN(y + dash_length, y1);
+        nk_stroke_line(canvas, x0, y, x0, end, thickness, color); // left
+        nk_stroke_line(canvas, x1, y, x1, end, thickness, color); // right
+    }
+}
+
+
 static void ui_draw_disk(struct nk_context *ctx, const disk_info_t *disk, int* selected_part) {
     nk_layout_row_dynamic(ctx, 100, 1);
     struct nk_rect bounds = nk_widget_bounds(ctx);
@@ -46,7 +70,7 @@ static void ui_draw_disk(struct nk_context *ctx, const disk_info_t *disk, int* s
 
     nk_fill_rect(canvas, bounds, 0, nk_rgb(220, 220, 220));
 
-    if (disk == NULL) {
+    if (disk == NULL || !disk->valid) {
         return;
     }
 
@@ -68,12 +92,32 @@ static void ui_draw_disk(struct nk_context *ctx, const disk_info_t *disk, int* s
 
         struct nk_color part_color = get_partition_color(i);
 
+        /* Always fill the background of partitions in white */
+        nk_fill_rect(canvas, part_rect, 0, NK_WHITE);
+        /* Check how empty/full it is, this is only valid for ZealFS partitions */
         if (*selected_part == i) {
-            nk_fill_rect(canvas, part_rect, 0, NK_SELECTED);
-        } else {
-            nk_fill_rect(canvas, part_rect, 0, NK_WHITE);
+            int percentage = ui_partition_viewer_get_partition_usage_percentage(NULL, NULL);
+            if (percentage > 0) {
+                struct nk_rect filled_rect = part_rect;
+                filled_rect.w = part_rect.w * ((float) percentage / 100.f);
+                nk_fill_rect(canvas, filled_rect, 0, NK_SELECTED);
+            }
         }
-        nk_stroke_rect(canvas, part_rect, 0, 5.0f, part_color);
+        /* Draw the border of the partition */
+        const float outer_border = 5.0f;
+        nk_stroke_rect(canvas, part_rect, 0, outer_border, part_color);
+        /* For the selected partition, add dashed border on top of it */
+        if (*selected_part == i) {
+            const float stroke_thick = 3.0f;
+            const float stroke_size = 7.8f;
+            const float stroke_space = 4.8f;
+            struct nk_rect dotted_part_rect = part_rect;
+            dotted_part_rect.x += 3.0f;
+            dotted_part_rect.y += 3.0f;
+            dotted_part_rect.w -= 5.0f;
+            dotted_part_rect.h -= 5.0f;
+            draw_dashed_rect(ctx, dotted_part_rect, NK_SELECTED, stroke_thick, stroke_size, stroke_space);
+        }
 
         char label[128];
         snprintf(label, sizeof(label), "Part. %d", i);
@@ -157,7 +201,7 @@ static void ui_draw_disk(struct nk_context *ctx, const disk_info_t *disk, int* s
         nk_selectable_label(ctx, disk_get_fs_type(part->type), NK_TEXT_LEFT, &select);
 
         /* Partition start address */
-        sprintf(buffer, "0x%08x", part->start_lba * DISK_SECTOR_SIZE);
+        sprintf(buffer, "0x%08lx", part->start_lba * DISK_SECTOR_SIZE);
         nk_selectable_label(ctx, buffer, NK_TEXT_LEFT, &select);
 
         /* Partition size */
@@ -298,7 +342,7 @@ static void ui_new_partition(struct nk_context *ctx, disk_info_t* disk)
         if (valid_entries > 0) {
             /* Make sure the selection isn't bigger than the last valid size */
             *selected = NK_MIN(*selected, valid_entries - 1);
-            *selected = nk_combo(ctx, disk_get_partition_size_list(), valid_entries,
+            *selected = nk_combo(ctx, disk_get_partition_size_list(NULL), valid_entries,
                                  *selected, COMBO_HEIGHT, nk_vec2(width, 150));
         } else {
             nk_label(ctx, "No size available", NK_TEXT_LEFT);
@@ -324,6 +368,73 @@ static void ui_new_partition(struct nk_context *ctx, disk_info_t* disk)
         }
         if (nk_button_label(ctx, "Cancel")) {
             popup_close(POPUP_NEWPART);
+        }
+    }
+    nk_end(ctx);
+}
+
+
+/**
+ * @brief Render the new disk image popup
+ */
+static void ui_new_image(struct nk_context *ctx, disk_list_state_t* state)
+{
+    struct nk_rect position;
+    void *arg;
+    if (!popup_is_opened(POPUP_NEWIMG, &position, &arg)) {
+        return;
+    }
+    if (nk_begin(ctx, "Create a new disk image", position, NK_WINDOW_TITLE | NK_WINDOW_BORDER | NK_WINDOW_MOVABLE))
+    {
+        static char image_path[4096] = "disk.img";
+        static int image_len = 8;
+        static int image_size_index = 0;
+
+        const float ratio[] = { 0.3f, 0.5f, 0.2f };
+        nk_layout_row(ctx, NK_DYNAMIC, COMBO_HEIGHT, 3, ratio);
+
+        /* Input field for the image name */
+        nk_label(ctx, "Location:", NK_TEXT_CENTERED);
+        /* Button to browse for a file using tinyfiledialogs */
+        nk_edit_string(ctx, NK_EDIT_FIELD, image_path, &image_len, sizeof(image_path), nk_filter_default);
+        if (nk_button_label(ctx, "Browse...")) {
+            const char* filter_patterns[] = { "*.img" };
+            const char* selected_file = tinyfd_saveFileDialog("Select Disk Image", image_path, 1, filter_patterns, NULL);
+            if (selected_file) {
+                strncpy(image_path, selected_file, sizeof(image_path) - 1);
+                image_path[sizeof(image_path) - 1] = '\0';
+                image_len = strlen(image_path);
+            }
+        }
+
+        /* Combo box for the image size */
+        nk_label(ctx, "Size:", NK_TEXT_CENTERED);
+        const float width = nk_widget_width(ctx);
+        int sizes_count = 0;
+        const char* const * sizes = disk_get_partition_size_list(&sizes_count);
+        image_size_index = nk_combo(ctx, sizes, sizes_count,
+                                    image_size_index, COMBO_HEIGHT, nk_vec2(width, 150));
+
+        nk_layout_row_dynamic(ctx, 30, 2);
+
+        /* One line padding */
+        nk_label(ctx, "", NK_TEXT_CENTERED);
+        nk_label(ctx, "", NK_TEXT_CENTERED);
+
+        if (nk_button_label(ctx, "Create")) {
+            /* The user clicked on `Create`, create a new disk image */
+            uint64_t selected_size = disk_get_size_of_idx(image_size_index);
+            popup_close(POPUP_NEWIMG);
+            if (!disk_create_image(state, image_path, selected_size)) {
+                static popup_info_t error_info = {
+                    .title = "Error",
+                    .msg = "Failed to create the disk image. Please try again."
+                };
+                popup_open(POPUP_MBR, 300, 140, &error_info);
+            }
+        }
+        if (nk_button_label(ctx, "Cancel")) {
+            popup_close(POPUP_NEWIMG);
         }
     }
     nk_end(ctx);
@@ -386,16 +497,22 @@ int main(void) {
         UpdateNuklear(ctx);
 
         /* If any popup is opened, the main window must not be focusable */
-        const int flags = popup_any_opened() ? NK_WINDOW_NO_INPUT : 0;
+        int flags = NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_MINIMIZABLE |
+                    NK_WINDOW_BORDER | NK_WINDOW_TITLE;
+        flags |= popup_any_opened() ? NK_WINDOW_NO_INPUT : 0;
         disk_list_state_t* state = disk_get_state();
         disk_info_t* current_disk = disk_get_current(state);
 
         nk_style_push_style_item(ctx, &ctx->style.window.fixed_background,
                                 nk_style_item_color(nk_rgb(0x39, 0x39, 0x39)));
 
-        const int disk_view_height = winHeight - MENUBAR_HEIGHT - ui_statusbar_height(ctx);
-        const int disk_view_width = winWidth;
-        if (nk_begin(ctx, "Disks", nk_rect(0, MENUBAR_HEIGHT, disk_view_width, disk_view_height), flags)) {
+        struct nk_rect disk_view_rect = {
+            .x = 0,
+            .y = MENUBAR_HEIGHT,
+            .w = winWidth * 0.70f,
+            .h = winHeight - MENUBAR_HEIGHT - ui_statusbar_height(ctx)
+        };
+        if (nk_begin(ctx, "Disk partitioning", disk_view_rect, flags)) {
 
             /* Create the top row with the buttons and the disk selection */
             const float ratio[] = { 0.10f, 0.15f, 0.15f, 0.07f, 0.07f, 0.15f, 0.3f };
@@ -453,6 +570,7 @@ int main(void) {
                     popup_open(POPUP_MBR, 300, 140, &info);
                 } else {
                     state->selected_disk = new_selection;
+                    state->selected_partition = -1;
                 }
             }
 
@@ -461,11 +579,24 @@ int main(void) {
         nk_end(ctx);
         nk_style_pop_style_item(ctx);
 
-        /* Manage the popups here */
+        /* Manage other windows here */
         ui_mbr_handle(ctx, current_disk);
         ui_apply_handle(ctx, current_disk);
         ui_cancel_handle(ctx, current_disk);
         ui_new_partition(ctx, current_disk);
+        ui_new_image(ctx, state);
+        /* Only allow the partition viewer if a partition is selected and we have no staged changes */
+        struct nk_rect viewer_bounds = {
+            .x = disk_view_rect.w,
+            .y = disk_view_rect.y,
+            .w = winWidth - disk_view_rect.w,
+            .h = disk_view_rect.h,
+        };
+        if (current_disk != NULL && !current_disk->has_staged_changes) {
+            ui_partition_viewer(ctx, current_disk, state->selected_partition, viewer_bounds);
+        } else {
+            ui_partition_viewer(ctx, current_disk, -1, viewer_bounds);
+        }
 
         /* Make the menubar always on top, returns non-zero if we must close the window */
         if (ui_menubar_show(ctx, state, winWidth)) {

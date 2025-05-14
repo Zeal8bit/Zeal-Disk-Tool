@@ -9,13 +9,14 @@
 #include <stdint.h>
 #include "nuklear.h"
 
-#define POPUP_COUNT    4
+#define POPUP_COUNT    5
 
 typedef enum {
     POPUP_MBR     = 0,
     POPUP_NEWPART = 1,
     POPUP_APPLY   = 2,
     POPUP_CANCEL  = 3,
+    POPUP_NEWIMG  = 4,
 } popup_t;
 
 

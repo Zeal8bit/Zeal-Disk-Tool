@@ -14,10 +14,8 @@
 #include <linux/fs.h>
 #include <sys/ioctl.h>
 
-#define DIM(arr) (sizeof(arr) / sizeof(*(arr)))
-
 static const char* s_image_files[] = {
-    // "emulated_sd.img",
+    "emulated_sd.img",
     // "backup_sd.img",
     // "test_disk.img"
 };
@@ -26,12 +24,9 @@ static disk_err_t disk_try_open(const char* path, disk_info_t* info, int is_file
 {
     int fd = open(path, O_RDONLY);
     if (fd < 0) {
-        if (errno == EACCES) {
-            return ERR_NOT_ADMIN;
-        } else if (errno == ENOENT) {
-            return ERR_INVALID;
+        if (errno != ENOENT) {
+            fprintf(stderr, "[LINUX] Skipping device %s: %s\n", path, strerror(errno));
         }
-        perror("Could not open the disk");
         return ERR_INVALID;
     }
 
@@ -91,7 +86,7 @@ disk_err_t disk_list(disk_info_t* out_disks, int max_disks, int* out_count)
 
 
     /* Check for images */
-    if (0 && *out_count < max_disks) {
+    if (*out_count < max_disks) {
         for (size_t i = 0; i < DIM(s_image_files) && *out_count < max_disks; ++i) {
             disk_err_t err = disk_try_open(s_image_files[i], &out_disks[*out_count], 1);
             if (err == ERR_SUCCESS) {
@@ -156,4 +151,61 @@ const char* disk_write_changes(disk_info_t* disk)
 error:
     close(fd);
     return error_msg;
+}
+
+
+int disk_open(disk_info_t* disk, void** ret_fd)
+{
+    assert(disk);
+    assert(disk->valid);
+
+    int fd = open(disk->name, O_RDWR);
+    if (fd < 0) {
+        fprintf(stderr, "[LINUX] Could not open disk %s: %s\n", disk->name, strerror(errno));
+        return 1;
+    }
+
+    /* Prevent a warning about casting different size integers */
+    *ret_fd = (void*)(intptr_t) fd;
+    return 0;
+}
+
+
+ssize_t disk_read(void* disk_fd, void* buffer, off_t disk_offset, uint32_t len)
+{
+    int fd = (int)(intptr_t) disk_fd;
+    if (lseek(fd, disk_offset, SEEK_SET) != disk_offset) {
+        fprintf(stderr, "[LINUX] Could not seek to offset %ld: %s\n", disk_offset, strerror(errno));
+        return -1;
+    }
+
+    ssize_t bytes_read = read(fd, buffer, len);
+    if (bytes_read < 0) {
+        fprintf(stderr, "[LINUX] Could not read from disk: %s\n", strerror(errno));
+    }
+
+    return bytes_read;
+}
+
+
+ssize_t disk_write(void* disk_fd, const void* buffer, off_t disk_offset, uint32_t len)
+{
+    int fd = (int)(intptr_t) disk_fd;
+    if (lseek(fd, disk_offset, SEEK_SET) != disk_offset) {
+        fprintf(stderr, "[LINUX] Could not seek to offset %ld: %s\n", disk_offset, strerror(errno));
+        return -1;
+    }
+
+    ssize_t bytes_written = write(fd, buffer, len);
+    if (bytes_written < 0) {
+        fprintf(stderr, "[LINUX] Could not write to disk: %s\n", strerror(errno));
+    }
+
+    return bytes_written;
+}
+
+
+void disk_close(void* disk_fd)
+{
+    close((int)(intptr_t) disk_fd);
 }
