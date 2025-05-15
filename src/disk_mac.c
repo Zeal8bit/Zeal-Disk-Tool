@@ -140,42 +140,58 @@ error:
 }
 
 
-int disk_open(const char* path, int flags) {
-    int fd = open(path, flags);
+int disk_open(disk_info_t* disk, void** ret_fd)
+{
+    assert(disk);
+    assert(disk->valid);
+
+    int fd = open(disk->name, O_RDWR);
     if (fd < 0) {
-        fprintf(stderr, "[DISK] Failed to open %s: %s\n", path, strerror(errno));
-    } else {
-        printf("[DISK] Opened %s with fd %d\n", path, fd);
+        fprintf(stderr, "[MAC] Could not open disk %s: %s\n", disk->name, strerror(errno));
+        return 1;
     }
-    return fd;
+
+    /* Prevent a warning about casting different size integers */
+    *ret_fd = (void*)(intptr_t) fd;
+    return 0;
 }
 
-ssize_t disk_read(int fd, void* buffer, size_t size) {
-    ssize_t bytes_read = read(fd, buffer, size);
-    if (bytes_read < 0) {
-        fprintf(stderr, "[DISK] Failed to read from fd %d: %s\n", fd, strerror(errno));
-    } else {
-        printf("[DISK] Read %zd bytes from fd %d\n", bytes_read, fd);
+
+ssize_t disk_read(void* disk_fd, void* buffer, off_t disk_offset, uint32_t len)
+{
+    int fd = (int)(intptr_t) disk_fd;
+    if (lseek(fd, disk_offset, SEEK_SET) != disk_offset) {
+        fprintf(stderr, "[MAC] Could not seek to offset %ld: %s\n", disk_offset, strerror(errno));
+        return -1;
     }
+
+    ssize_t bytes_read = read(fd, buffer, len);
+    if (bytes_read < 0) {
+        fprintf(stderr, "[MAC] Could not read from disk: %s\n", strerror(errno));
+    }
+
     return bytes_read;
 }
 
-ssize_t disk_write(int fd, const void* buffer, size_t size) {
-    ssize_t bytes_written = write(fd, buffer, size);
-    if (bytes_written < 0) {
-        fprintf(stderr, "[DISK] Failed to write to fd %d: %s\n", fd, strerror(errno));
-    } else {
-        printf("[DISK] Wrote %zd bytes to fd %d\n", bytes_written, fd);
+
+ssize_t disk_write(void* disk_fd, const void* buffer, off_t disk_offset, uint32_t len)
+{
+    int fd = (int)(intptr_t) disk_fd;
+    if (lseek(fd, disk_offset, SEEK_SET) != disk_offset) {
+        fprintf(stderr, "[MAC] Could not seek to offset %ld: %s\n", disk_offset, strerror(errno));
+        return -1;
     }
+
+    ssize_t bytes_written = write(fd, buffer, len);
+    if (bytes_written < 0) {
+        fprintf(stderr, "[MAC] Could not write to disk: %s\n", strerror(errno));
+    }
+
     return bytes_written;
 }
 
-int disk_close(int fd) {
-    int result = close(fd);
-    if (result < 0) {
-        fprintf(stderr, "[DISK] Failed to close fd %d: %s\n", fd, strerror(errno));
-    } else {
-        printf("[DISK] Closed fd %d\n", fd);
-    }
-    return result;
+
+void disk_close(void* disk_fd)
+{
+    close((int)(intptr_t) disk_fd);
 }
