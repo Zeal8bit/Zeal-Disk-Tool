@@ -123,7 +123,7 @@ const char* disk_write_changes(disk_info_t* disk)
                 sprintf(error_msg, "Could not offset in the disk %s: %s\n", disk->name, strerror(errno));
                 goto error;
             }
-            wr = write(fd, part->data, part->data_len);
+            ssize_t wr = write(fd, part->data, part->data_len);
             if (wr != part->data_len) {
                 sprintf(error_msg, "Could not write partition to disk %s: %s\n", disk->name, strerror(errno));
                 goto error;
