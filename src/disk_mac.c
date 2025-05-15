@@ -25,7 +25,9 @@ static disk_err_t disk_try_open(const char* path, disk_info_t* info, int is_file
 
     int fd = open(path, O_RDONLY);
     if (fd < 0) {
-        fprintf(stderr, "[MAC] Skipping device %s: %s\n", path, strerror(errno));
+        if (errno != ENOENT) {
+            fprintf(stderr, "[MAC] Skipping device %s: %d %s\n", path, errno, strerror(errno));
+        }
         return ERR_INVALID;
     }
 
@@ -95,7 +97,7 @@ const char* disk_write_changes(disk_info_t* disk)
     assert(disk->has_staged_changes);
 
     /* Reopen the disk to write it back */
-    int fd = open(disk->name, O_WRONLY);
+    int fd = open(disk->path, O_WRONLY);
     if (fd < 0) {
         sprintf(error_msg, "Could not open disk %s: %s\n", disk->name, strerror(errno));
         return error_msg;
@@ -145,7 +147,7 @@ int disk_open(disk_info_t* disk, void** ret_fd)
     assert(disk);
     assert(disk->valid);
 
-    int fd = open(disk->name, O_RDWR);
+    int fd = open(disk->path, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "[MAC] Could not open disk %s: %s\n", disk->name, strerror(errno));
         return 1;
