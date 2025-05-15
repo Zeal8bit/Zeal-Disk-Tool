@@ -120,32 +120,6 @@ static inline uint8_t to_bcd(int value) {
     return (((value / 10) % 10) << 4) | (value % 10);
 }
 
-/**
- * @brief Get the next power of two of the given number
- */
-static inline uint64_t upper_power_of_two(long long disk_size)
-{
-    assert(disk_size != 0);
-    int highest_one = 0;
-    /* Number of ones in the integer*/
-    int ones = 0;
-
-    for (int i = 32; i >= 0; i--) {
-        if (disk_size & BIT(i)) {
-            if (highest_one == 0) highest_one = i;
-            else ones++;
-        }
-    }
-
-    if (ones == 0) {
-        return disk_size;
-    }
-
-    /* If we got more than a single 1 bit, we have to return the next power
-     * of two, so return BIT(highest_one+1) */
-    return BIT(highest_one+1);
-}
-
 
 /**
  * @brief Free a page in the header bitmap.

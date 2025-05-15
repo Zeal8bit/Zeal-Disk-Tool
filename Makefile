@@ -21,6 +21,16 @@ FORCE:
 
 
 ##########################
+#       Shortcuts        #
+##########################
+
+linux: $(TARGET)
+linux32: $(TARGET)32
+windows: $(WIN_TARGET)
+macosx: $(MAC_TARGET)
+
+
+##########################
 # Build the Linux binary #
 ##########################
 $(TARGET): src/disk_linux.c $(COMMON_SRCS) build/raylib-nuklear-linux.o

@@ -161,7 +161,7 @@ ssize_t disk_read(void* disk_fd, void* buffer, off_t disk_offset, uint32_t len)
 {
     int fd = (int)(intptr_t) disk_fd;
     if (lseek(fd, disk_offset, SEEK_SET) != disk_offset) {
-        fprintf(stderr, "[MAC] Could not seek to offset %ld: %s\n", disk_offset, strerror(errno));
+        fprintf(stderr, "[MAC] Could not seek to offset %lld: %s\n", disk_offset, strerror(errno));
         return -1;
     }
 
@@ -178,7 +178,7 @@ ssize_t disk_write(void* disk_fd, const void* buffer, off_t disk_offset, uint32_
 {
     int fd = (int)(intptr_t) disk_fd;
     if (lseek(fd, disk_offset, SEEK_SET) != disk_offset) {
-        fprintf(stderr, "[MAC] Could not seek to offset %ld: %s\n", disk_offset, strerror(errno));
+        fprintf(stderr, "[MAC] Could not seek to offset %lld: %s\n", disk_offset, strerror(errno));
         return -1;
     }
 
