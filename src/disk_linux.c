@@ -13,9 +13,10 @@
 #include <sys/stat.h>
 #include <linux/fs.h>
 #include <sys/ioctl.h>
+#include <inttypes.h>
 
 static const char* s_image_files[] = {
-    "emulated_sd.img",
+    // "emulated_sd.img",
     // "backup_sd.img",
     // "test_disk.img"
 };
@@ -103,23 +104,24 @@ const char* disk_write_changes(disk_info_t* disk)
 {
     assert(disk);
     assert(disk->valid);
-    assert(disk->has_mbr);
     assert(disk->has_staged_changes);
 
     static char error_msg[1024];
 
     /* Reopen the disk to write it back */
-    int fd = open(disk->name, O_WRONLY);
+    int fd = open(disk->path, O_WRONLY);
     if (fd < 0) {
         sprintf(error_msg, "Could not open disk %s: %s\n", disk->name, strerror(errno));
         return error_msg;
     }
 
     /* Write MBR */
-    ssize_t wr = write(fd, disk->staged_mbr, sizeof(disk->staged_mbr));
-    if (wr != DISK_SECTOR_SIZE) {
-        sprintf(error_msg, "Could not write disk %s: %s\n", disk->name, strerror(errno));
-        goto error;
+    if (disk->has_mbr) {
+        ssize_t wr = write(fd, disk->staged_mbr, sizeof(disk->staged_mbr));
+        if (wr != DISK_SECTOR_SIZE) {
+            sprintf(error_msg, "Could not write disk %s: %s\n", disk->name, strerror(errno));
+            goto error;
+        }
     }
 
     /* Write any new partition */
@@ -129,12 +131,12 @@ const char* disk_write_changes(disk_info_t* disk)
             /* Data need to be written back to the disk */
             off_t part_offset = part->start_lba * DISK_SECTOR_SIZE;
             const off_t offset = lseek(fd, part_offset, SEEK_SET);
-            printf("[DISK] Writing partition %d @ %08lx, %d bytes\n", i, offset, part->data_len);
+            printf("[DISK] Writing partition %d @ %08" PRIx64 ", %d bytes\n", i, offset, part->data_len);
             if (offset != part_offset){
                 sprintf(error_msg, "Could not offset in the disk %s: %s\n", disk->name, strerror(errno));
                 goto error;
             }
-            wr = write(fd, part->data, part->data_len);
+            ssize_t wr = write(fd, part->data, part->data_len);
             if (wr != part->data_len) {
                 sprintf(error_msg, "Could not write partition to disk %s: %s\n", disk->name, strerror(errno));
                 goto error;
@@ -159,7 +161,7 @@ int disk_open(disk_info_t* disk, void** ret_fd)
     assert(disk);
     assert(disk->valid);
 
-    int fd = open(disk->name, O_RDWR);
+    int fd = open(disk->path, O_RDWR);
     if (fd < 0) {
         fprintf(stderr, "[LINUX] Could not open disk %s: %s\n", disk->name, strerror(errno));
         return 1;
@@ -175,7 +177,7 @@ ssize_t disk_read(void* disk_fd, void* buffer, off_t disk_offset, uint32_t len)
 {
     int fd = (int)(intptr_t) disk_fd;
     if (lseek(fd, disk_offset, SEEK_SET) != disk_offset) {
-        fprintf(stderr, "[LINUX] Could not seek to offset %ld: %s\n", disk_offset, strerror(errno));
+        fprintf(stderr, "[LINUX] Could not seek to offset %" PRId64 ": %s\n", disk_offset, strerror(errno));
         return -1;
     }
 
@@ -192,7 +194,7 @@ ssize_t disk_write(void* disk_fd, const void* buffer, off_t disk_offset, uint32_
 {
     int fd = (int)(intptr_t) disk_fd;
     if (lseek(fd, disk_offset, SEEK_SET) != disk_offset) {
-        fprintf(stderr, "[LINUX] Could not seek to offset %ld: %s\n", disk_offset, strerror(errno));
+        fprintf(stderr, "[LINUX] Could not seek to offset %" PRId64 ": %s\n", disk_offset, strerror(errno));
         return -1;
     }
 

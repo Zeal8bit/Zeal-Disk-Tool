@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+#include <inttypes.h>
 #include "app_version.h"
 #include "app_icon.h"
 #include "raylib.h"
@@ -77,8 +78,9 @@ static void ui_draw_disk(struct nk_context *ctx, const disk_info_t *disk, int* s
     const uint64_t total_sectors = disk->size_bytes / DISK_SECTOR_SIZE;
     for (int i = 0; i < MAX_PART_COUNT; ++i) {
         const partition_t *p = &disk->staged_partitions[i];
-        if (!p->active || p->size_sectors == 0)
+        if (!p->active || p->size_sectors == 0) {
             continue;
+        }
 
         float start_frac = (float)p->start_lba / (float)total_sectors;
         float size_frac = (float)p->size_sectors / (float)total_sectors;
@@ -306,6 +308,11 @@ static void ui_cancel_handle(struct nk_context *ctx, disk_info_t* disk)
  */
 static void ui_new_partition(struct nk_context *ctx, disk_info_t* disk)
 {
+    const char* all_alignments[] = { "512 bytes", "1 MiB" };
+    static int selected_alignment = 1;
+    static int selected_size = 0;
+    const int alignment = (selected_alignment == 0) ? 512 : 1048576;
+
     struct nk_rect position;
     void *arg;
     if (!popup_is_opened(POPUP_NEWPART, &position, &arg)) {
@@ -324,7 +331,7 @@ static void ui_new_partition(struct nk_context *ctx, disk_info_t* disk)
         }
 
         /* There is a free partition on the disk */
-        uint32_t largest_free_lba_addr = 0;
+        uint64_t largest_free_addr = 0;
 
         const float ratio[] = { 0.3f, 0.6f };
         nk_layout_row(ctx, NK_DYNAMIC, COMBO_HEIGHT, 2, ratio);
@@ -337,22 +344,24 @@ static void ui_new_partition(struct nk_context *ctx, disk_info_t* disk)
 
         /* For the partition size, do not propose anything bigger than the disk size of course */
         nk_label(ctx, "Size:", NK_TEXT_CENTERED);
-        const int valid_entries = disk_valid_partition_size(disk, &largest_free_lba_addr);
-        int *selected = (int*) arg;
+        const int valid_entries = disk_valid_partition_size(disk, alignment, &largest_free_addr);
         if (valid_entries > 0) {
             /* Make sure the selection isn't bigger than the last valid size */
-            *selected = NK_MIN(*selected, valid_entries - 1);
-            *selected = nk_combo(ctx, disk_get_partition_size_list(NULL), valid_entries,
-                                 *selected, COMBO_HEIGHT, nk_vec2(width, 150));
+            selected_size = NK_MIN(selected_size, valid_entries - 1);
+            selected_size = nk_combo(ctx, disk_get_partition_size_list(NULL), valid_entries,
+                                 selected_size, COMBO_HEIGHT, nk_vec2(width, 150));
         } else {
             nk_label(ctx, "No size available", NK_TEXT_LEFT);
         }
 
+        /* Combo box for the alignment */
+        nk_label(ctx, "Alignment:", NK_TEXT_CENTERED);
+        selected_alignment = nk_combo(ctx, all_alignments, 2, selected_alignment, COMBO_HEIGHT, nk_vec2(width, 150));
+
         /* Show the address where it will be created */
         char address[16];
-        const long unsigned largest_free_addr = largest_free_lba_addr * DISK_SECTOR_SIZE;
         nk_label(ctx, "Address:", NK_TEXT_CENTERED);
-        snprintf(address, sizeof(address), "0x%08lx", largest_free_addr);
+        snprintf(address, sizeof(address), "0x%08" PRIx64, largest_free_addr);
         nk_label(ctx, address, NK_TEXT_LEFT);
 
         nk_layout_row_dynamic(ctx, 30, 2);
@@ -363,7 +372,8 @@ static void ui_new_partition(struct nk_context *ctx, disk_info_t* disk)
 
         if (valid_entries != -1 && nk_button_label(ctx, "Create")) {
             /* The user clicked on `Create`, allocate a new ZealFS partition */
-            disk_allocate_partition(disk, largest_free_lba_addr, *selected);
+            assert(largest_free_addr % DISK_SECTOR_SIZE == 0);
+            disk_allocate_partition(disk, largest_free_addr / DISK_SECTOR_SIZE, selected_size);
             popup_close(POPUP_NEWPART);
         }
         if (nk_button_label(ctx, "Cancel")) {
@@ -379,6 +389,7 @@ static void ui_new_partition(struct nk_context *ctx, disk_info_t* disk)
  */
 static void ui_new_image(struct nk_context *ctx, disk_list_state_t* state)
 {
+    disk_info_t* current_disk = disk_get_current(state);
     struct nk_rect position;
     void *arg;
     if (!popup_is_opened(POPUP_NEWIMG, &position, &arg)) {
@@ -412,8 +423,23 @@ static void ui_new_image(struct nk_context *ctx, disk_list_state_t* state)
         const float width = nk_widget_width(ctx);
         int sizes_count = 0;
         const char* const * sizes = disk_get_partition_size_list(&sizes_count);
+        int former_size_index = image_size_index;
         image_size_index = nk_combo(ctx, sizes, sizes_count,
                                     image_size_index, COMBO_HEIGHT, nk_vec2(width, 150));
+        nk_label(ctx, "", NK_TEXT_CENTERED);
+
+        /* Combo box for the partition table */
+        nk_label(ctx, "Table:", NK_TEXT_CENTERED);
+        const char* partition_table_options[] = { "None", "MBR" };
+        static int selected_partition_table = 0;
+        /* If the size just changed and the new size is smalle than a few MB, make None the default option */
+        if (former_size_index != image_size_index) {
+            /* Default to "None" if the disk size selected is a few MB or lower */
+            selected_partition_table = (image_size_index <= 5) ? 0 : 1;
+        }
+        selected_partition_table = nk_combo(ctx, partition_table_options, 2, selected_partition_table, COMBO_HEIGHT, nk_vec2(width, 150));
+        nk_label(ctx, "", NK_TEXT_CENTERED);
+
 
         nk_layout_row_dynamic(ctx, 30, 2);
 
@@ -425,12 +451,17 @@ static void ui_new_image(struct nk_context *ctx, disk_list_state_t* state)
             /* The user clicked on `Create`, create a new disk image */
             uint64_t selected_size = disk_get_size_of_idx(image_size_index);
             popup_close(POPUP_NEWIMG);
-            if (!disk_create_image(state, image_path, selected_size)) {
+            int new_index = disk_create_image(state, image_path, selected_size, selected_partition_table == 1);
+            if (new_index == -1) {
                 static popup_info_t error_info = {
                     .title = "Error",
                     .msg = "Failed to create the disk image. Please try again."
                 };
                 popup_open(POPUP_MBR, 300, 140, &error_info);
+            } else if (!current_disk->has_staged_changes) {
+                /* Switch to thew newly created disk if the current one has no pending changes */
+                state->selected_disk = new_index;
+                state->selected_partition = -1;
             }
         }
         if (nk_button_label(ctx, "Cancel")) {
@@ -563,14 +594,14 @@ int main(void) {
 
             int new_selection = ui_combo_disk(ctx, state, combo_width);
             if (new_selection != state->selected_disk) {
-                if (current_disk->has_staged_changes) {
+                if (disk_can_be_switched(current_disk)) {
+                    state->selected_disk = new_selection;
+                    state->selected_partition = -1;
+                } else {
                     static popup_info_t info = {
                         .title = "Cannot switch disk",
                         .msg = "The selected disk has unsaved changes. Please apply or discard them before switching disks."};
                     popup_open(POPUP_MBR, 300, 140, &info);
-                } else {
-                    state->selected_disk = new_selection;
-                    state->selected_partition = -1;
                 }
             }
 

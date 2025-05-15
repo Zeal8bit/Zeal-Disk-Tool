@@ -34,10 +34,12 @@ int ui_combo_disk(struct nk_context *ctx, disk_list_state_t* state, int width)
 
     disk_info_t* disks = state->disks;
 
-    char label[DISK_LABEL_LEN];
+    char label[DISK_LABEL_LEN] = { 0 };
     disk_info_t* current_disk = disk_get_current(state);
-    snprintf(label, DISK_LABEL_LEN, "%s", current_disk->label);
-    label[0] = current_disk->has_staged_changes ? '*' : ' ';
+    if (current_disk) {
+        snprintf(label, DISK_LABEL_LEN, "%s", current_disk->label);
+        label[0] = current_disk->has_staged_changes ? '*' : ' ';
+    }
 
     if (nk_combo_begin_label(ctx, label, size)) {
         nk_layout_row_dynamic(ctx, (float)COMBO_HEIGHT, 1);

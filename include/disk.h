@@ -92,6 +92,11 @@ static inline int disk_is_valid_zealfs_partition(partition_t* part)
     return part != NULL && part->active && part->type == 0x5A;
 }
 
+static inline int disk_can_be_switched(disk_info_t* disk)
+{
+    return disk == NULL || !disk->has_staged_changes;
+}
+
 /**
  * ============================================================================
  *                              PORTABLE CODE
@@ -120,7 +125,7 @@ const char* disk_format_partition(disk_info_t* disk, int partition);
 
 void disk_delete_partition(disk_info_t* disk, int partition);
 
-int disk_valid_partition_size(disk_info_t *disk, uint32_t *largest_free_lba);
+int disk_valid_partition_size(disk_info_t *disk, uint32_t align, uint64_t *largest_free_addr);
 
 const char* disk_get_fs_type(uint8_t fs_byte);
 
@@ -140,7 +145,7 @@ const char* disk_write_changes(disk_info_t* disk);
  */
 int disk_open_image_file(disk_list_state_t* state);
 
-int disk_create_image(disk_list_state_t* state, const char* path, uint64_t size);
+int disk_create_image(disk_list_state_t* state, const char* path, uint64_t size, bool init_mbr);
 
 
 /**

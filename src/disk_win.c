@@ -67,7 +67,6 @@ const char* disk_write_changes(disk_info_t* disk)
 #endif
     static char error_msg[1024];
     assert(disk);
-    assert(disk->has_mbr);
     assert(disk->has_staged_changes);
 
 
@@ -78,14 +77,16 @@ const char* disk_write_changes(disk_info_t* disk)
         return error_msg;
     }
 
-    /* Let's be safe and set the pointer */
-    SetFilePointer(fd, 0, NULL, FILE_BEGIN);
-    DWORD wr = 0;
-    BOOL success = WriteFile(fd, disk->staged_mbr, 512, &wr, NULL);
-    if (!success || wr != DISK_SECTOR_SIZE) {
-        snprintf(error_msg, sizeof(error_msg),
-            "Could not write disk %s: %lu\n", disk->name, GetLastError());
-        goto error;
+    if (disk->has_mbr) {
+        /* Let's be safe and set the pointer */
+        SetFilePointer(fd, 0, NULL, FILE_BEGIN);
+        DWORD wr = 0;
+        BOOL success = WriteFile(fd, disk->staged_mbr, 512, &wr, NULL);
+        if (!success || wr != DISK_SECTOR_SIZE) {
+            snprintf(error_msg, sizeof(error_msg),
+                "Could not write disk %s: %lu\n", disk->name, GetLastError());
+            goto error;
+        }
     }
 
     /* Write any new partition */

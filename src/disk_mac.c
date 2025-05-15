@@ -93,7 +93,6 @@ const char* disk_write_changes(disk_info_t* disk)
 {
     static char error_msg[1024];
     assert(disk);
-    assert(disk->has_mbr);
     assert(disk->has_staged_changes);
 
     /* Reopen the disk to write it back */
@@ -104,10 +103,12 @@ const char* disk_write_changes(disk_info_t* disk)
     }
 
     /* Write MBR */
-    ssize_t wr = write(fd, disk->staged_mbr, sizeof(disk->staged_mbr));
-    if (wr != DISK_SECTOR_SIZE) {
-        sprintf(error_msg, "Could not write disk %s: %s\n", disk->name, strerror(errno));
-        goto error;
+    if (disk->has_mbr) {
+        ssize_t wr = write(fd, disk->staged_mbr, sizeof(disk->staged_mbr));
+        if (wr != DISK_SECTOR_SIZE) {
+            sprintf(error_msg, "Could not write disk %s: %s\n", disk->name, strerror(errno));
+            goto error;
+        }
     }
 
     /* Write any new partition */

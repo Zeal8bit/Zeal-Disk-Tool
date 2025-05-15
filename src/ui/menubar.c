@@ -69,7 +69,8 @@ void ui_menubar_load_image(struct nk_context *ctx, disk_list_state_t* state)
     disk_info_t* current_disk = disk_get_current(state);
     /* Make the newly opened image the current disk only if it is valid AND teh current disk has no changes */
     int new_disk_idx = disk_open_image_file(state);
-    if (new_disk_idx >= 0 && !current_disk->has_staged_changes && state->disks[new_disk_idx].valid) {
+    const int new_disk_valid = new_disk_idx >= 0 && state->disks[new_disk_idx].valid;
+    if (new_disk_valid && disk_can_be_switched(current_disk)) {
         state->selected_disk = new_disk_idx;
     }
 }

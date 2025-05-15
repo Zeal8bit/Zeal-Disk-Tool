@@ -12,8 +12,16 @@
 #include "ui/tinyfiledialogs.h"
 #include "zealfs_v2.h"
 
+#define ALIGN_UP(size,bound) (((size) + (bound) - 1) & ~((bound) - 1))
 
 static disk_list_state_t s_state;
+
+static const uint64_t s_valid_sizes[] = {
+    32*KB, 64*KB, 128*KB, 256*KB, 512*KB,
+    1*MB, 2*MB, 4*MB, 8*MB, 16*MB, 32*MB, 64*MB, 128*MB, 256*MB, 512*MB,
+    1*GB, 2*GB, 4*GB
+};
+
 
 static void disk_generate_label(disk_info_t* disk)
 {
@@ -21,6 +29,27 @@ static void disk_generate_label(disk_info_t* disk)
     disk_get_size_str(disk->size_bytes, size_str, sizeof(size_str));
     /* Keep the first character empty, it will be a `*` in case there is any pending change */
     snprintf(disk->label, DISK_LABEL_LEN, " %.*s (%s)", (int) sizeof(disk->name), disk->name, size_str);
+}
+
+const char* const *disk_get_partition_size_list(int* count)
+{
+    static const char* const sizes[] = {
+        "32KiB", "64KiB", "128KiB", "256KiB", "512KiB",
+        "1MiB", "2MiB", "4MiB", "8MiB", "16MiB", "32MiB", "64MiB", "128MiB", "256MiB", "512MiB",
+        "1GiB", "2GiB", "4GiB"
+    };
+    if (count) {
+        *count = DIM(sizes);
+    }
+    return sizes;
+}
+
+uint64_t disk_get_size_of_idx(int index)
+{
+    if (index < 0 || index >= DIM(s_valid_sizes)) {
+        return 0;
+    }
+    return s_valid_sizes[index];
 }
 
 
@@ -94,15 +123,17 @@ static int disk_is_invalid(disk_info_t* disk)
     if (disk == NULL || !disk->valid) {
         ui_statusbar_printf("Invalid disk %s", disk->name);
         return true;
-    } else if (!disk->has_mbr) {
-        ui_statusbar_printf("Disk %s has no MBR!", disk->name);
-        return true;
     }
     return false;
 }
 
 static int disk_find_free_partition(disk_info_t* disk)
 {
+    if (!disk->has_mbr) {
+        /* No MBR, only allow the first partition to be used */
+        return disk->staged_partitions[0].active ? -1 : 0;
+    }
+
     /* Find free partition */
     for (int i = 0; i < MAX_PART_COUNT; ++i) {
         if (!disk->staged_partitions[i].active) {
@@ -144,10 +175,17 @@ void disk_allocate_partition(disk_info_t *disk, uint32_t lba, int size_idx)
         return;
     }
     /* Calculate the size in sector size */
-    const uint64_t part_size_bytes = 1ULL << (16ULL + size_idx);
+    const uint64_t part_size_bytes = disk_get_size_of_idx(size_idx);
     const uint32_t size_sector = part_size_bytes / DISK_SECTOR_SIZE;
 
-    assert(disk->free_part_idx >= 0 && disk->free_part_idx < 4);
+    if (disk->free_part_idx == -1 || (!disk->has_mbr && disk->free_part_idx > 0)) {
+        ui_statusbar_print("Error: Could not find a free partition!");
+        return;
+    }
+    if (disk->free_part_idx < 0 || disk->free_part_idx >= 4) {
+        ui_statusbar_print("Error: Free partition index out of bounds!");
+        return;
+    }
 
     partition_t* part = &disk->staged_partitions[disk->free_part_idx];
     assert(!part->active);
@@ -233,14 +271,16 @@ void disk_delete_partition(disk_info_t* disk, int partition)
     if (part->active) {
         disk->has_staged_changes = true;
         printf("[DISK] Deleting partition %d\n", partition);
-        part->active = false;
-        part->data_len = 0;
         free(part->data);
-        part->data = NULL;
+        memset(part, 0, sizeof(partition_t));
         /* If the disk has no free partition, the current one is free now! */
         if (disk->free_part_idx == -1) {
             disk->free_part_idx = partition;
         }
+
+        /* Encode the partition in the staged MBR */
+        uint8_t *entry = &disk->staged_mbr[MBR_PART_ENTRY_BEGIN + partition * MBR_PART_ENTRY_SIZE];
+        disk_write_mbr_entry(entry, part);
 
         ui_statusbar_printf("Partition %d deleted", partition);
     }
@@ -338,36 +378,48 @@ void disk_get_size_str(uint64_t size, char* buffer, int buffer_size)
  */
 void disk_parse_mbr_partitions(disk_info_t *disk)
 {
-    if (!disk->has_mbr) {
-        return;
-    }
-
     int free_part_idx = -1;
 
-    for (int i = 0; i < MAX_PART_COUNT; ++i) {
-        const uint8_t *entry = disk->mbr + 446 + i * 16;
-
-        partition_t *p  = &disk->partitions[i];
-        p->type         = entry[4];
-        p->start_lba    = entry[8] | (entry[9] << 8) | (entry[10] << 16) | (entry[11] << 24);
-        p->size_sectors = entry[12] | (entry[13] << 8) | (entry[14] << 16) | (entry[15] << 24);
-        /* Be very conservative to make sure nothing is erased! */
-        p->active       = (entry[0] & 0x80) != 0 || p->type != 0 ||
-                          p->start_lba != 0 || p->size_sectors != 0;
-
-        if (!p->active && free_part_idx == -1) {
-            free_part_idx = i;
+    if (!disk->has_mbr) {
+        memset(disk->partitions, 0, sizeof(disk->partitions));
+        if (disk->mbr[0] == ZEALFS_TYPE && disk->mbr[1] == 2) {
+            disk->partitions[0] = (partition_t) {
+                .active       = true,
+                .type         = ZEALFS_TYPE,
+                .start_lba    = 0,
+                .size_sectors = disk->size_bytes / DISK_SECTOR_SIZE,
+            };
+        } else {
+            /* No ZealFS partition found, mark the first partition as free */
+            free_part_idx = 0;
         }
+    } else {
+        for (int i = 0; i < MAX_PART_COUNT; ++i) {
+            const uint8_t *entry = disk->mbr + 446 + i * 16;
+
+            partition_t *p  = &disk->partitions[i];
+            p->type         = entry[4];
+            p->start_lba    = entry[8] | (entry[9] << 8) | (entry[10] << 16) | (entry[11] << 24);
+            p->size_sectors = entry[12] | (entry[13] << 8) | (entry[14] << 16) | (entry[15] << 24);
+            /* Be very conservative to make sure nothing is erased! */
+            p->active       = (entry[0] & 0x80) != 0 || p->type != 0 ||
+                            p->start_lba != 0 || p->size_sectors != 0;
+
+            if (!p->active && free_part_idx == -1) {
+                free_part_idx = i;
+            }
+        }
+        memcpy(disk->staged_mbr, disk->mbr, sizeof(disk->mbr));
     }
+
     /* Create a mirror for the RAM changes */
     disk->has_staged_changes = false;
     disk->free_part_idx = free_part_idx;
-    memcpy(disk->staged_mbr, disk->mbr, sizeof(disk->mbr));
     memcpy(disk->staged_partitions, disk->partitions, sizeof(disk->partitions));
 }
 
 
-uint32_t disk_largest_free_space(disk_info_t *disk, uint32_t *largest_free_lba)
+static uint64_t disk_largest_free_space(disk_info_t *disk, uint64_t *largest_free_addr)
 {
     /* Total disk sector in bytes */
     const uint32_t disk_size_sectors = disk->size_bytes / DISK_SECTOR_SIZE;
@@ -377,6 +429,13 @@ uint32_t disk_largest_free_space(disk_info_t *disk, uint32_t *largest_free_lba)
     /* Check all the gaps between the sections and keep the maximum in `largest_free_space` */
     uint32_t previous_end_lba = largest_start_address;
 
+    /* If the disk has no MBR, the disk size is the maximum */
+    if (!disk->has_mbr) {
+        if (largest_free_addr) {
+            *largest_free_addr = 0;
+        }
+        return disk->size_bytes;
+    }
 
     /* Build a sorted list of active partition indexes */
     int sorted_indexes[MAX_PART_COUNT];
@@ -422,89 +481,33 @@ uint32_t disk_largest_free_space(disk_info_t *disk, uint32_t *largest_free_lba)
         largest_start_address = previous_end_lba;
     }
 
-    if (largest_free_lba) {
-        *largest_free_lba = largest_start_address;
+    if (largest_free_addr) {
+        *largest_free_addr = largest_start_address * DISK_SECTOR_SIZE;
     }
 
-    return largest_free_space;
-}
-
-
-static uint64_t align_lba_address(uint32_t lba_start_address, uint32_t alignment, uint32_t* sectors)
-{
-    const uint32_t align_sector = (alignment / DISK_SECTOR_SIZE) - 1;
-    const uint32_t new_lba_address = (lba_start_address + align_sector) & ~align_sector;
-
-    if (sectors) {
-        *sectors -= new_lba_address - lba_start_address;
-    }
-
-    return new_lba_address;
-}
-
-
-const char* const *disk_get_partition_size_list(int* count)
-{
-    static const char* const sizes[] = {
-        "64KiB", "128KiB", "256KiB", "512KiB",
-        "1MiB", "2MiB", "4MiB", "8MiB",
-        "16MiB", "32MiB", "64MiB", "128MiB", "256MiB", "512MiB",
-        "1GiB", "2GiB", "4GiB"
-    };
-    if (count) {
-        *count = DIM(sizes);
-    }
-    return sizes;
-}
-
-uint64_t disk_get_size_of_idx(int index)
-{
-    const uint64_t sizes[] = {
-        64*KB, 128*KB, 256*KB, 512*KB, 1*MB, 2*MB, 4*MB, 8*MB,
-        16*MB, 32*MB, 64*MB, 128*MB, 256*MB, 512*MB,
-        1*GB, 2*GB, 4*GB
-    };
-
-    if (index < 0 || index >= DIM(sizes)) {
-        return 0;
-    }
-    return sizes[index];
+    return largest_free_space * DISK_SECTOR_SIZE;
 }
 
 
 /**
  * @brief Get the number of valid entries for a new partition
  */
-int disk_valid_partition_size(disk_info_t *disk, uint32_t *largest_free_lba)
+int disk_valid_partition_size(disk_info_t *disk, uint32_t align, uint64_t *largest_free_addr)
 {
-    const uint32_t free_sectors = disk_largest_free_space(disk, largest_free_lba);
-    if (free_sectors == 0) {
-        return 0;
+    uint64_t free_start_addr = 0;
+    uint64_t free_bytes = disk_largest_free_space(disk, &free_start_addr);
+
+    /* Try to align the address on the given alignment */
+    uint64_t aligned_addr = ALIGN_UP(free_start_addr, align);
+    uint64_t wasted_bytes = aligned_addr - free_start_addr;
+    free_bytes -= wasted_bytes;
+
+    if (largest_free_addr) {
+        *largest_free_addr = aligned_addr;
     }
 
-    /* Try to align the LBA address on 1MB, if it results in a free size of 0, try to align on 4KB, else ... no space*/
-    uint32_t aligned_lba_sectors = free_sectors;
-    uint32_t aligned_lba_address = align_lba_address(*largest_free_lba, MB, &aligned_lba_sectors);
-    if (aligned_lba_sectors == 0) {
-        /* Try to align on 4KB instead */
-        aligned_lba_sectors = free_sectors;
-        aligned_lba_address = align_lba_address(*largest_free_lba, 4*KB, &aligned_lba_sectors);
-        /* If still no free sector, give up */
-        if (aligned_lba_sectors == 0) {
-            return 0;
-        }
-    }
-    *largest_free_lba = aligned_lba_address;
-
-    const uint64_t free_space = aligned_lba_sectors * DISK_SECTOR_SIZE;
-    const uint64_t sizes[] = {
-        64*KB, 128*KB, 256*KB, 512*KB, 1*MB, 2*MB, 4*MB, 8*MB,
-        16*MB, 32*MB, 64*MB, 128*MB, 256*MB, 512*MB,
-        1*GB, 2*GB, 4*GB
-    };
-
-    for (int i = 0; i < (sizeof(sizes) / sizeof(*sizes)); i++) {
-        if (sizes[i] > free_space) {
+    for (int i = 0; i < DIM(s_valid_sizes); i++) {
+        if (s_valid_sizes[i] > free_bytes) {
             return i;
         }
     }
@@ -611,9 +614,11 @@ int disk_open_image_file(disk_list_state_t* state)
 }
 
 
-int disk_create_image(disk_list_state_t* state, const char* path, uint64_t size)
+int disk_create_image(disk_list_state_t* state, const char* path, uint64_t size, bool init_mbr)
 {
     int new_index = state->disk_count;
+    /* Allocate a buffer for the MBR and initialize it to 0 */
+    uint8_t mbr[DISK_SECTOR_SIZE] = {0};
 
     if (new_index >= MAX_DISKS) {
         ui_statusbar_print("Maximum number of disks reached!");
@@ -631,17 +636,17 @@ int disk_create_image(disk_list_state_t* state, const char* path, uint64_t size)
         return -1;
     }
 
-    /* Allocate a buffer for the MBR and initialize it to 0 */
-    uint8_t mbr[DISK_SECTOR_SIZE] = {0};
-    /* Set the MBR signature */
-    mbr[510] = 0x55;
-    mbr[511] = 0xAA;
+    if (init_mbr) {
+        /* Set the MBR signature */
+        mbr[510] = 0x55;
+        mbr[511] = 0xAA;
 
-    /* Write the MBR to the file */
-    if (fwrite(mbr, 1, DISK_SECTOR_SIZE, file) != DISK_SECTOR_SIZE) {
-        ui_statusbar_printf("Failed to write MBR to file: %s", path);
-        fclose(file);
-        return -1;
+        /* Write the MBR to the file */
+        if (fwrite(mbr, 1, DISK_SECTOR_SIZE, file) != DISK_SECTOR_SIZE) {
+            ui_statusbar_printf("Failed to write MBR to file: %s", path);
+            fclose(file);
+            return -1;
+        }
     }
 
     /* Extend the file to the desired size */
@@ -659,8 +664,10 @@ int disk_create_image(disk_list_state_t* state, const char* path, uint64_t size)
     disk->size_bytes = size;
     disk->valid = true;
     disk->is_image = true;
-    disk->has_mbr = true;
-    memcpy(disk->mbr, mbr, sizeof(mbr));
+    disk->has_mbr = init_mbr;
+    if (init_mbr) {
+        memcpy(disk->mbr, mbr, sizeof(mbr));
+    }
     disk_parse_mbr_partitions(disk);
 
     snprintf(disk->path, sizeof(disk->path), "%s", path);
