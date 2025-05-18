@@ -169,14 +169,37 @@ static void disk_write_mbr_entry(uint8_t *entry, const partition_t *part)
 }
 
 
-void disk_allocate_partition(disk_info_t *disk, uint32_t lba, int size_idx)
+int disk_create_mbr(disk_info_t *disk)
 {
+    if (disk == NULL || disk->has_mbr || disk->has_staged_changes || !disk->valid) {
+        return 0;
+    }
+    disk->has_mbr = true;
+    /* The OS specific disk layer requires that the `has_staged_changes` is set */
+    disk->has_staged_changes = true;
+    /* Reset the MBR and set the signature only */
+    memset(disk->staged_mbr, 0, sizeof(disk->staged_mbr));
+    disk->staged_mbr[510] = 0x55;
+    disk->staged_mbr[511] = 0xAA;
+
+    const char* ret = disk_write_changes(disk);
+    disk->has_staged_changes = false;
+    if (ret == NULL) {
+        memcpy(disk->mbr, disk->staged_mbr, sizeof(disk->staged_mbr));
+        disk_parse_mbr_partitions(disk);
+        return 1;
+    }
+    return 0;
+}
+
+
+void disk_allocate_partition(disk_info_t *disk, uint32_t lba, uint32_t sectors_count)
+{
+    const uint64_t part_size_bytes = sectors_count * DISK_SECTOR_SIZE;
+
     if (disk_is_invalid(disk)) {
         return;
     }
-    /* Calculate the size in sector size */
-    const uint64_t part_size_bytes = disk_get_size_of_idx(size_idx);
-    const uint32_t size_sector = part_size_bytes / DISK_SECTOR_SIZE;
 
     if (disk->free_part_idx == -1 || (!disk->has_mbr && disk->free_part_idx > 0)) {
         ui_statusbar_print("Error: Could not find a free partition!");
@@ -194,7 +217,7 @@ void disk_allocate_partition(disk_info_t *disk, uint32_t lba, int size_idx)
     part->active = true;
     part->start_lba = lba;
     part->type = 0x5a;
-    part->size_sectors = size_sector;
+    part->size_sectors = sectors_count;
 
     /* Encode the partition in the staged MBR */
     uint8_t *entry = &disk->staged_mbr[MBR_PART_ENTRY_BEGIN + disk->free_part_idx * MBR_PART_ENTRY_SIZE];
@@ -492,7 +515,7 @@ static uint64_t disk_largest_free_space(disk_info_t *disk, uint64_t *largest_fre
 /**
  * @brief Get the number of valid entries for a new partition
  */
-int disk_valid_partition_size(disk_info_t *disk, uint32_t align, uint64_t *largest_free_addr)
+uint64_t disk_max_partition_size(disk_info_t *disk, uint32_t align, uint64_t *largest_free_addr)
 {
     uint64_t free_start_addr = 0;
     uint64_t free_bytes = disk_largest_free_space(disk, &free_start_addr);
@@ -506,13 +529,7 @@ int disk_valid_partition_size(disk_info_t *disk, uint32_t align, uint64_t *large
         *largest_free_addr = aligned_addr;
     }
 
-    for (int i = 0; i < DIM(s_valid_sizes); i++) {
-        if (s_valid_sizes[i] > free_bytes) {
-            return i;
-        }
-    }
-
-    return -1;
+    return free_bytes;
 }
 
 
@@ -673,7 +690,7 @@ int disk_create_image(disk_list_state_t* state, const char* path, uint64_t size,
     snprintf(disk->path, sizeof(disk->path), "%s", path);
     /* Extract the filename out of the path */
     const char* base_name = disk_get_basename(path);
-    snprintf(disk->name, sizeof(disk->name), "%s", base_name ? base_name + 1 : path);
+    snprintf(disk->name, sizeof(disk->name), "%s", base_name);
     /* Label depends on the name, so it must be done after setting the name */
     disk_generate_label(disk);
 

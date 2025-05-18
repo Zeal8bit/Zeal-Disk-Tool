@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <assert.h>
 
 #ifndef BIT
@@ -153,14 +154,26 @@ static inline int zealfsv2_format(uint8_t* partition, uint64_t size) {
     const int page_size_bytes = zealfsv2_page_size(size);
     /* The page size in the header is the log2(page_bytes/256) - 1 */
     header->page_size = ((sizeof(int) * 8) - (__builtin_clz(page_size_bytes >> 8))) - 1;
-    header->bitmap_size = size / page_size_bytes / 8;
+    /* Calculate the total number of pages in the partition, it mus tbe rounded down */
+    const uint32_t pages_count = size / page_size_bytes;
+    /* The bitmap size must be rounded up, but we will mark the "extra" bytes as reserved */
+    header->bitmap_size =  (pages_count + 7) / 8;
     /* If the page size is 256, there will be only one page for the FAT */
     const int fat_pages_count = 1 + (page_size_bytes == 256 ? 0 : 1);
     /* Do not count the first page and the second page */
     header->free_pages = size / page_size_bytes - 1 - fat_pages_count;
     /* All the pages are free (0), mark the first one as occupied */
     header->pages_bitmap[0] = 3 | ((fat_pages_count > 1) ? 4 : 0);
+    /* Check if we have to reserve some pages in the bitmap (unallocatable )*/
+    const int last_valid_pages_count = (pages_count % 8);
+    if (last_valid_pages_count != 0) {
+        /* It's always the last page that has the reserved pages, generate the bitmap */
+        uint32_t bitmap = 0xFF << last_valid_pages_count;
+        header->pages_bitmap[header->bitmap_size - 1] = (uint8_t) (bitmap & 0xff);
+        printf("Last bitmap byte is: %x\n", (bitmap & 0xff));
+    }
 
+    printf("[ZEALFS] Partition size: %" PRIu64 " bytes\n", size);
     printf("[ZEALFS] Bitmap size: %d bytes\n", header->bitmap_size);
     printf("[ZEALFS] Pages size: %d bytes (code %d)\n", page_size_bytes, ((page_size_bytes >> 8) - 1));
 #if 0
@@ -300,6 +313,19 @@ int zealfs_rmdir(const char* path, zealfs_context_t* ctx);
  * @return The amount of free space in bytes.
  */
 uint32_t zealfs_free_space(zealfs_context_t* ctx);
+
+
+/**
+ * Determines the size of the partition based on the count of bitmap pages.
+ *
+ * This function calculates the total size of a partition by analyzing the
+ * number of bitmap pages. Bitmap pages are used to track the allocation
+ * status of blocks within the partition, and their count directly influences
+ * the overall size of the partition.
+ *
+ * @return The size of the partition in bytes.
+ */
+uint32_t zealfs_total_space(zealfs_context_t* ctx);
 
 
 /**

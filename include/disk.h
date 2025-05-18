@@ -119,13 +119,15 @@ const char* const *disk_get_partition_size_list(int* count);
 
 uint64_t disk_get_size_of_idx(int index);
 
-void disk_allocate_partition(disk_info_t *disk, uint32_t lba, int size_idx);
+int disk_create_mbr(disk_info_t *disk);
+
+void disk_allocate_partition(disk_info_t *disk, uint32_t lba, uint32_t sectors_count);
 
 const char* disk_format_partition(disk_info_t* disk, int partition);
 
 void disk_delete_partition(disk_info_t* disk, int partition);
 
-int disk_valid_partition_size(disk_info_t *disk, uint32_t align, uint64_t *largest_free_addr);
+uint64_t disk_max_partition_size(disk_info_t *disk, uint32_t align, uint64_t *largest_free_addr);
 
 const char* disk_get_fs_type(uint8_t fs_byte);
 

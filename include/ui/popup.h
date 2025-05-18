@@ -23,6 +23,7 @@ typedef enum {
 typedef struct {
     const char* title;
     const char* msg;
+    void* data;
 } popup_info_t;
 
 void popup_init(int win_width, int win_height);

@@ -410,7 +410,13 @@ int ui_partition_viewer_get_partition_usage_percentage(uint64_t* free_bytes, uin
     if (free_bytes) {
         *free_bytes = free_space;
     }
+
     uint64_t size_bytes = m_part_ctx.partition->size_sectors * DISK_SECTOR_SIZE;
+    /* If the partition starts at 0, it means that the disk has no MBR, instead of taking the
+     * whole disk as the partition size, use the number of bytes in the bitmap */
+    if (m_part_ctx.partition->start_lba == 0) {
+        size_bytes = zealfs_total_space(&zealfs_ctx);
+    }
     if (total_bytes) {
         *total_bytes = size_bytes;
     }

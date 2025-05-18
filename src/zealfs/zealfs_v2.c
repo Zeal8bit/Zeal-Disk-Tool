@@ -201,6 +201,15 @@ uint32_t zealfs_free_space(zealfs_context_t* ctx)
 }
 
 
+uint32_t zealfs_total_space(zealfs_context_t* ctx)
+{
+    zealfs_header_t* header = (zealfs_header_t*) ctx->header;
+    assert (check_header(ctx) == 0);
+    const uint32_t pages_count = (uint32_t) header->bitmap_size * 8U;
+    return pages_count * get_page_size(header);
+}
+
+
 /**
  * @brief Function that goes through the absolute path given as a parameter and verifies
  *        that each sub-directory does exist in the disk image.

@@ -17,7 +17,7 @@
 
 static const char* s_image_files[] = {
     // "emulated_sd.img",
-    // "backup_sd.img",
+    // "disk.img",
     // "test_disk.img"
 };
 

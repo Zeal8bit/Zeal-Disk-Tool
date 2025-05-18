@@ -14,12 +14,15 @@ static popup_info_t info;
 void ui_menubar_create_mbr(struct nk_context *ctx, disk_info_t* disk)
 {
     if (disk != NULL) {
+        info.data = NULL;
         info.title = "Create MBR table";
         if (disk->has_mbr) {
             info.msg = "Selected disk already has an MBR";
+        } else if (disk->has_staged_changes) {
+            info.msg = "Disk has staged changes, cannot proceed. Apply or cancel the changes first";
         } else {
-            info.msg = "Feature not supported yet";
-            // mbr_last_msg = "MBR created successfully!";
+            info.msg = "This change CANNOT be reverted, it will take effect immediately, are you sure?";
+            info.data = (void*) 1;
         }
         popup_open(POPUP_MBR, 300, 140, &info);
     }

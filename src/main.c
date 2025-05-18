@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <assert.h>
 #include <inttypes.h>
@@ -20,6 +21,11 @@
 #include "ui/statusbar.h"
 #include "ui/partition_viewer.h"
 #include "ui/tinyfiledialogs.h"
+
+typedef enum {
+    UNIT_KIB = 0,
+    UNIT_MIB = 1,
+} units_t;
 
 static struct nk_context *ctx;
 
@@ -167,6 +173,17 @@ static void ui_draw_disk(struct nk_context *ctx, const disk_info_t *disk, int* s
     nk_style_push_color(ctx, &ctx->style.selectable.hover_active.data.color,  NK_TRANSPARENT);
     nk_style_push_color(ctx, &ctx->style.selectable.pressed_active.data.color,  NK_TRANSPARENT);
 
+    /* Show that an MBR is present (if that's the case) */
+    if (disk->has_mbr) {
+        nk_label(ctx, " ",                  NK_TEXT_CENTERED);
+        nk_label(ctx, " ",                  NK_TEXT_LEFT);
+        nk_label(ctx, "-",                  NK_TEXT_LEFT);
+        nk_label(ctx, "MBR",                NK_TEXT_LEFT);
+        nk_label(ctx, "",                   NK_TEXT_LEFT);
+        nk_label(ctx, "",                   NK_TEXT_CENTERED);
+        nk_label(ctx, " ",                  NK_TEXT_LEFT);
+    }
+
     for (int i = 0; i < MAX_PART_COUNT; i++) {
         char buffer[256];
         const partition_t* part = &disk->staged_partitions[i];
@@ -236,8 +253,22 @@ static void ui_mbr_handle(struct nk_context *ctx, disk_info_t* disk)
             nk_window_set_bounds(ctx, info->title, position);
             nk_layout_row_dynamic(ctx, 40, 1);
             nk_label_wrap(ctx, info->msg);
-            if (nk_button_label(ctx, "Okay")) {
+            if (info->data == NULL && nk_button_label(ctx, "Okay")) {
                 popup_close(POPUP_MBR);
+            } else if (info->data) {
+                /* Yes/No prompt */
+                nk_layout_row_dynamic(ctx, 40, 2);
+                if (nk_button_label(ctx, "Yes")) {
+                    int success = disk_create_mbr(disk);
+                    if (success) {
+                        ui_statusbar_printf("MBR created successfully!\n");
+                    } else {
+                        ui_statusbar_printf("Error creating the MBR\n");
+                    }
+                    popup_close(POPUP_MBR);
+                } else if (nk_button_label(ctx, "Cancel")) {
+                    popup_close(POPUP_MBR);
+                }
             }
         }
         nk_end(ctx);
@@ -301,6 +332,17 @@ static void ui_cancel_handle(struct nk_context *ctx, disk_info_t* disk)
     (void) disk;
 }
 
+/**
+ * @brief Helper to convert a size, in the given unit, into a string
+ */
+static void size_to_str(uint64_t size, units_t unit, char* output, int length)
+{
+    if (unit == UNIT_KIB) {
+        snprintf(output, length, "%ld", size);
+    } else {
+        snprintf(output, length, "%.1f", ((float) size) / KB);
+    }
+}
 
 
 /**
@@ -309,9 +351,14 @@ static void ui_cancel_handle(struct nk_context *ctx, disk_info_t* disk)
 static void ui_new_partition(struct nk_context *ctx, disk_info_t* disk)
 {
     const char* all_alignments[] = { "512 bytes", "1 MiB" };
+    static char size_input[16];
     static int selected_alignment = 1;
-    static int selected_size = 0;
+    static uint64_t selected_size_kb;
     const int alignment = (selected_alignment == 0) ? 512 : 1048576;
+    /* Shall be set to 1 when the popup was just opened */
+    static int init_state = 1;
+    const char* units[] = { "KiB", "MiB" };
+    static units_t selected_unit = UNIT_KIB;
 
     struct nk_rect position;
     void *arg;
@@ -333,36 +380,95 @@ static void ui_new_partition(struct nk_context *ctx, disk_info_t* disk)
         /* There is a free partition on the disk */
         uint64_t largest_free_addr = 0;
 
-        const float ratio[] = { 0.3f, 0.6f };
-        nk_layout_row(ctx, NK_DYNAMIC, COMBO_HEIGHT, 2, ratio);
+        const float ratio[] = { 0.3f, 0.45f, 0.25f };
+        nk_layout_row(ctx, NK_DYNAMIC, COMBO_HEIGHT, 3, ratio);
 
         /* Combo box for the partition type, only ZealFS v2 (for now?) */
         nk_label(ctx, "Type:", NK_TEXT_CENTERED);
         const char* types[] = { "ZealFSv2" };
         const float width = nk_widget_width(ctx);
         nk_combo(ctx, types, 1, 0, COMBO_HEIGHT, nk_vec2(width, 150));
+        /* Padding */
+        nk_label(ctx, "", NK_TEXT_CENTERED);
 
         /* For the partition size, do not propose anything bigger than the disk size of course */
         nk_label(ctx, "Size:", NK_TEXT_CENTERED);
-        const int valid_entries = disk_valid_partition_size(disk, alignment, &largest_free_addr);
-        if (valid_entries > 0) {
-            /* Make sure the selection isn't bigger than the last valid size */
-            selected_size = NK_MIN(selected_size, valid_entries - 1);
-            selected_size = nk_combo(ctx, disk_get_partition_size_list(NULL), valid_entries,
-                                 selected_size, COMBO_HEIGHT, nk_vec2(width, 150));
+        uint64_t max_size = disk_max_partition_size(disk, alignment, &largest_free_addr);
+        uint64_t min_size_kb = 8;
+        uint64_t max_size_kb = max_size / KB;
+
+        if (max_size >= min_size_kb * KB) {
+
+            /* Determine available units based on max_size */
+            int unit_count = (max_size < 1*MB) ? 1 : 2;
+
+            /* Popup was just opened, set the selected size to the maximum */
+            if (init_state) {
+                selected_size_kb = max_size_kb;
+                selected_unit = (selected_size_kb >= 1024) ? UNIT_MIB : UNIT_KIB;
+                size_to_str(selected_size_kb, selected_unit, size_input, sizeof(size_input));
+                init_state = 0;
+            }
+
+            /* Numeric text field for size input, allow decimals in `MiB` mode only */
+            struct nk_color border = ctx->style.edit.border_color;
+            /* Show that the given value is incorrect by making the border red */
+            if (selected_size_kb < min_size_kb) {
+                ctx->style.edit.border_color = nk_rgb(255, 0, 0);
+            }
+            nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, size_input, sizeof(size_input),
+                                           selected_unit == UNIT_KIB ? nk_filter_decimal : nk_filter_float);
+            ctx->style.edit.border_color = border;
+            const int new_selected_unit = nk_combo(ctx, units, unit_count, (int) selected_unit, COMBO_HEIGHT, nk_vec2(width, 150));
+
+            /* Convert input size to KB according to the FORMER unit selected */
+            if (selected_unit == UNIT_KIB) {
+                selected_size_kb = (uint64_t) atoll(size_input);
+            } else {
+                selected_size_kb = (uint64_t) (atof(size_input) * KB);
+            }
+
+            /* Check if the unit has just been changed */
+            selected_unit = new_selected_unit;
+
+
+            /* Clamp the selected size to valid range */
+            if (selected_size_kb > max_size / KB) {
+                selected_size_kb = max_size / KB;
+            }
+
+            /* Slider for size selection */
+            nk_layout_row_dynamic(ctx, 30, 1);
+
+            const int new_size_kb = nk_slide_int(ctx, 0, selected_size_kb, max_size_kb, 1);
+            /* If the selected value changed and is lower than 1MB, switch back to KiB unit */
+            if (new_size_kb != selected_size_kb) {
+                selected_unit = (selected_size_kb >= 1024) ? UNIT_MIB : UNIT_KIB;
+                selected_size_kb = new_size_kb;
+            }
+
+            /* Update the text field based on slider if the input was not empty at first (else, it will be impossible
+             * to have an empty field to type a number)*/
+            if (strlen(size_input) != 0) {
+                size_to_str(selected_size_kb, selected_unit, size_input, sizeof(size_input));
+            }
         } else {
-            nk_label(ctx, "No size available", NK_TEXT_LEFT);
+            nk_label(ctx, "Insufficient free space to create a new partition", NK_TEXT_LEFT);
+            nk_label(ctx, "", NK_TEXT_CENTERED);
         }
+        nk_layout_row(ctx, NK_DYNAMIC, COMBO_HEIGHT, 3, ratio);
 
         /* Combo box for the alignment */
         nk_label(ctx, "Alignment:", NK_TEXT_CENTERED);
         selected_alignment = nk_combo(ctx, all_alignments, 2, selected_alignment, COMBO_HEIGHT, nk_vec2(width, 150));
+        nk_label(ctx, "", NK_TEXT_CENTERED);
 
         /* Show the address where it will be created */
         char address[16];
         nk_label(ctx, "Address:", NK_TEXT_CENTERED);
         snprintf(address, sizeof(address), "0x%08" PRIx64, largest_free_addr);
         nk_label(ctx, address, NK_TEXT_LEFT);
+        nk_label(ctx, "", NK_TEXT_CENTERED);
 
         nk_layout_row_dynamic(ctx, 30, 2);
 
@@ -370,11 +476,13 @@ static void ui_new_partition(struct nk_context *ctx, disk_info_t* disk)
         nk_label(ctx, "", NK_TEXT_CENTERED);
         nk_label(ctx, "", NK_TEXT_CENTERED);
 
-        if (valid_entries != -1 && nk_button_label(ctx, "Create")) {
+        if (nk_button_label(ctx, "Create") && selected_size_kb > min_size_kb) {
+            const uint64_t sectors_count = (selected_size_kb * KB) / DISK_SECTOR_SIZE;
             /* The user clicked on `Create`, allocate a new ZealFS partition */
             assert(largest_free_addr % DISK_SECTOR_SIZE == 0);
-            disk_allocate_partition(disk, largest_free_addr / DISK_SECTOR_SIZE, selected_size);
+            disk_allocate_partition(disk, largest_free_addr / DISK_SECTOR_SIZE, sectors_count);
             popup_close(POPUP_NEWPART);
+            init_state = 1;
         }
         if (nk_button_label(ctx, "Cancel")) {
             popup_close(POPUP_NEWPART);
@@ -458,7 +566,7 @@ static void ui_new_image(struct nk_context *ctx, disk_list_state_t* state)
                     .msg = "Failed to create the disk image. Please try again."
                 };
                 popup_open(POPUP_MBR, 300, 140, &error_info);
-            } else if (!current_disk->has_staged_changes) {
+            } else if (current_disk == NULL || !current_disk->has_staged_changes) {
                 /* Switch to thew newly created disk if the current one has no pending changes */
                 state->selected_disk = new_index;
                 state->selected_partition = -1;
@@ -592,12 +700,14 @@ int main(void) {
             nk_label(ctx, "Select a disk:", NK_TEXT_RIGHT);
             float combo_width = nk_widget_width(ctx);
 
+            int former_disk = state->selected_disk;
             int new_selection = ui_combo_disk(ctx, state, combo_width);
-            if (new_selection != state->selected_disk) {
+            if (new_selection != former_disk) {
                 if (disk_can_be_switched(current_disk)) {
-                    state->selected_disk = new_selection;
+                    /* `selected_disk` will be modified by `ui_combo_disk` */
                     state->selected_partition = -1;
                 } else {
+                    state->selected_disk = former_disk;
                     static popup_info_t info = {
                         .title = "Cannot switch disk",
                         .msg = "The selected disk has unsaved changes. Please apply or discard them before switching disks."};
