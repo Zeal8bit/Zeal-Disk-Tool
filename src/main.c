@@ -338,7 +338,7 @@ static void ui_cancel_handle(struct nk_context *ctx, disk_info_t* disk)
 static void size_to_str(uint64_t size, units_t unit, char* output, int length)
 {
     if (unit == UNIT_KIB) {
-        snprintf(output, length, "%ld", size);
+        snprintf(output, length, "%" PRIu64, size);
     } else {
         snprintf(output, length, "%.1f", ((float) size) / KB);
     }

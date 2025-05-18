@@ -100,12 +100,13 @@ const char* disk_write_changes(disk_info_t* disk)
             LARGE_INTEGER part_offset = {
                 .QuadPart = part->start_lba * DISK_SECTOR_SIZE
             };
-            success = SetFilePointerEx(fd, part_offset, &offset, FILE_BEGIN);
+            BOOL success = SetFilePointerEx(fd, part_offset, &offset, FILE_BEGIN);
             printf("[DISK] Writing partition %d @ %08llx, %d bytes\n", i, offset.QuadPart, part->data_len);
             if (offset.QuadPart != part_offset.QuadPart){
                 sprintf(error_msg, "Could not offset in the disk %s: %lu\n", disk->name, GetLastError());
                 goto error;
             }
+            DWORD wr = 0;
             success = WriteFile(fd, part->data, part->data_len, &wr, NULL);
             if (!success || wr != part->data_len) {
                 sprintf(error_msg, "Could not write partition to disk %s: %lu\n", disk->name, GetLastError());
