@@ -550,19 +550,6 @@ static bool disk_image_opened(disk_list_state_t* state, const char* path, int* i
 }
 
 
-static const char* disk_get_basename(const char* path)
-{
-    const char* last_slash = NULL;
-    #ifdef _WIN32
-        last_slash = strrchr(path, '\\');
-    #else
-        last_slash = strrchr(path, '/');
-    #endif
-
-    return last_slash ? last_slash : path;
-}
-
-
 int disk_open_image_file(disk_list_state_t* state)
 {
     if (state->disk_count >= MAX_DISKS) {
@@ -620,7 +607,7 @@ int disk_open_image_file(disk_list_state_t* state)
     snprintf(disk->path, sizeof(disk->name), "%s", file_path);
     /* Extract the filename out of the path */
     const char* base_name = disk_get_basename(file_path);
-    snprintf(disk->name, sizeof(disk->name), "%s", base_name ? base_name + 1 : file_path);
+    snprintf(disk->name, sizeof(disk->name), "%s", base_name);
     /* Label depends on the name, so it must be done after setting the name */
     disk_generate_label(disk);
 

@@ -4,9 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #include <windows.h>
+#include <commctrl.h>  // for Progress Bar
 #include <assert.h>
 #include <stdio.h>
+#include <errno.h>
 #include "disk.h"
+#define MIN(a,b)    (((a) < (b)) ? (a) : (b))
 
 disk_err_t disk_list(disk_info_t* out_disks, int max_disks, int* out_count) {
     *out_count = 0;
@@ -127,6 +130,30 @@ error:
 }
 
 
+static int set_errno(void)
+{
+    DWORD error_code = GetLastError();
+    switch (error_code) {
+        case ERROR_ACCESS_DENIED:
+            errno = EACCES;
+            break;
+        case ERROR_INVALID_PARAMETER:
+            errno = EINVAL;
+            break;
+        case ERROR_NOT_ENOUGH_MEMORY:
+            errno = ENOMEM;
+            break;
+        case ERROR_HANDLE_EOF:
+            errno = ENODATA;
+            break;
+        default:
+            errno = EIO;
+            break;
+    }
+    return -errno;
+}
+
+
 int disk_open(disk_info_t* disk, void** ret_fd)
 {
     assert(disk);
@@ -137,7 +164,7 @@ int disk_open(disk_info_t* disk, void** ret_fd)
                             FILE_SHARE_READ | FILE_SHARE_WRITE,
                             NULL, OPEN_EXISTING, 0, NULL);
     if (fd == INVALID_HANDLE_VALUE) {
-        return 1;
+        return set_errno();
     }
 
     *ret_fd = fd;
@@ -148,27 +175,44 @@ int disk_open(disk_info_t* disk, void** ret_fd)
 ssize_t disk_read(void* disk_fd, void* buffer, off_t disk_offset, uint32_t len)
 {
     HANDLE handle = (HANDLE) disk_fd;
+    uint8_t temp_buffer[DISK_SECTOR_SIZE];
+    ssize_t total_read = 0;
     DWORD bytes_read;
     BOOL success;
 
     assert(handle != INVALID_HANDLE_VALUE);
     assert(buffer);
-    assert(len > 0);
 
     LARGE_INTEGER li_offset = {
         .QuadPart = disk_offset,
     };
     if (!SetFilePointerEx(handle, li_offset, NULL, FILE_BEGIN)) {
-        return -1;
+        return set_errno();
     }
 
-    success = ReadFile(handle, buffer, (DWORD)len, &bytes_read, NULL);
-
-    if (!success || bytes_read != len) {
-        return -2;
+    // Read the aligned portion
+    const uint32_t aligned_len = len & ~(DISK_SECTOR_SIZE - 1);
+    if (aligned_len > 0) {
+        success = ReadFile(handle, buffer, aligned_len, &bytes_read, NULL);
+        if (!success || bytes_read != aligned_len) {
+            return set_errno();
+        }
+        buffer += bytes_read;
+        total_read += bytes_read;
     }
 
-    return bytes_read;
+    // Read the remaining portion
+    const uint32_t remaining_len = len & (DISK_SECTOR_SIZE - 1);
+    if (remaining_len > 0) {
+        success = ReadFile(handle, temp_buffer, DISK_SECTOR_SIZE, &bytes_read, NULL);
+        if (!success || bytes_read != DISK_SECTOR_SIZE) {
+            return set_errno();
+        }
+        memcpy(buffer, temp_buffer, remaining_len);
+        total_read += remaining_len;
+    }
+
+    return total_read;
 }
 
 
@@ -184,13 +228,12 @@ ssize_t disk_write(void* disk_fd, const void* buffer, off_t disk_offset, uint32_
         .QuadPart = disk_offset
     };
     if (!SetFilePointerEx(handle, li_offset, NULL, FILE_BEGIN)) {
-        return -1;
+        return set_errno();
     }
 
     BOOL success = WriteFile(handle, buffer, (DWORD)len, &bytes_written, NULL);
-
     if (!success || bytes_written != len) {
-        return -2;
+        return set_errno();
     }
 
     return bytes_written;
@@ -202,5 +245,67 @@ void disk_close(void* disk_fd)
     HANDLE handle = (HANDLE) disk_fd;
     if (handle != INVALID_HANDLE_VALUE) {
         CloseHandle(handle);
+    }
+}
+
+
+static HWND hwndProgress = NULL;
+static HWND hwndWindow = NULL;
+
+extern int winWidth;
+extern int winHeight;
+extern int winX;
+extern int winY;
+
+
+void disk_init_progress_bar(void) {
+    INITCOMMONCONTROLSEX icex = { sizeof(icex), ICC_PROGRESS_CLASS };
+    InitCommonControlsEx(&icex);
+
+    int width = 350;
+    int height = 100;
+
+    int centerX = winX + winWidth / 2;
+    int centerY = winY + winHeight / 2;
+
+    hwndWindow = CreateWindowEx(
+        0, WC_DIALOG, "Copying file...", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+        centerX - width / 2, centerY - height / 2, width, height,
+        NULL, NULL, GetModuleHandle(NULL), NULL);
+
+
+    hwndProgress = CreateWindowEx(
+        0, PROGRESS_CLASS, NULL,
+        WS_CHILD | WS_VISIBLE,
+        20, 20, 300, 20,
+        hwndWindow, NULL, GetModuleHandle(NULL), NULL);
+
+    SendMessage(hwndProgress, PBM_SETRANGE, 0, MAKELPARAM(0, 100));
+    SendMessage(hwndProgress, PBM_SETPOS, 0, 0);
+
+    ShowWindow(hwndWindow, SW_SHOW);
+    UpdateWindow(hwndWindow);
+}
+
+
+void disk_update_progress_bar(int percent) {
+    if (hwndProgress) {
+        SendMessage(hwndProgress, PBM_SETPOS, percent, 0);
+
+        // Process UI messages so it updates
+        MSG msg;
+        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+    }
+}
+
+
+void disk_destroy_progress_bar(void) {
+    if (hwndWindow) {
+        DestroyWindow(hwndWindow);
+        hwndWindow = NULL;
+        hwndProgress = NULL;
     }
 }

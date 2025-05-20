@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <string.h>
 #include <stdbool.h>
 #define DIM(arr) (sizeof(arr) / sizeof(*(arr)))
 
@@ -97,6 +98,20 @@ static inline int disk_can_be_switched(disk_info_t* disk)
     return disk == NULL || !disk->has_staged_changes;
 }
 
+
+static inline const char* disk_get_basename(const char* path)
+{
+    const char* last_slash = NULL;
+#ifdef _WIN32
+    last_slash = strrchr(path, '\\');
+#else
+    last_slash = strrchr(path, '/');
+#endif
+
+    return last_slash ? last_slash + 1 : path;
+}
+
+
 /**
  * ============================================================================
  *                              PORTABLE CODE
@@ -172,6 +187,7 @@ int disk_open(disk_info_t* disk, void** ret_fd);
  * @param disk_fd The abstract file descriptor of the disk, obtained from disk_open.
  * @param buffer A pointer to the buffer where the read data will be stored.
  * @param disk_offset The offset on the disk from where the read operation will start.
+ *        Guaranteed to be aligned on DISK_SECTOR_SIZE.
  * @param len The number of bytes to read.
  * @return The number of bytes read on success, or a negative value indicating an error.
  *         Logs errors if any occur.
@@ -184,6 +200,7 @@ ssize_t disk_read(void* disk_fd, void* buffer, off_t disk_offset, uint32_t len);
  * @param disk_fd The abstract file descriptor of the disk, obtained from disk_open.
  * @param buffer A pointer to the buffer containing the data to be written.
  * @param disk_offset The offset on the disk where the write operation will start.
+ *        Guaranteed to be aligned on DISK_SECTOR_SIZE.
  * @param len The number of bytes to write.
  * @return The number of bytes written on success, or a negative value indicating an error.
  *         Logs errors if any occur.
@@ -198,5 +215,34 @@ ssize_t disk_write(void* disk_fd, const void* buffer, off_t disk_offset, uint32_
  *         Logs errors if any occur.
  */
 void disk_close(void* disk_fd);
+
+
+/**
+ * OPTIONAL OS FEATURES
+ */
+/**
+ * @brief Initializes the progress bar for disk operations.
+ *
+ * This function sets up the progress bar to provide visual feedback
+ * to the user about the progress of a disk operation.
+ */
+void disk_init_progress_bar(void);
+
+/**
+ * @brief Updates the progress bar with the current progress.
+ *
+ * @param percent The current progress percentage (0 to 100).
+ * This function updates the progress bar to reflect the given
+ * percentage, providing real-time feedback to the user.
+ */
+void disk_update_progress_bar(int percent);
+
+/**
+ * @brief Destroys the progress bar after the operation is complete.
+ *
+ * This function cleans up any resources associated with the progress bar
+ * and removes it from the display once the disk operation is finished.
+ */
+void disk_destroy_progress_bar(void);
 
 #endif // DISK_H

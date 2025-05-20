@@ -29,8 +29,10 @@ typedef enum {
 
 static struct nk_context *ctx;
 
-int winWidth, winHeight;
-
+int winWidth;
+int winHeight;
+int winX;
+int winY;
 
 static struct nk_color get_partition_color(int i)
 {
@@ -580,7 +582,7 @@ static void ui_new_image(struct nk_context *ctx, disk_list_state_t* state)
 }
 
 
-static void setup_window() {
+static void setup_window(int argc, char* argv[]) {
     InitWindow(0, 0, "Zeal Disk Tool " VERSION);
 
     // get current monitor details
@@ -596,22 +598,35 @@ static void setup_window() {
 
     // center the window on the current monitor
     Vector2 mon_pos = GetMonitorPosition(monitor);
-    int pos_x = mon_pos.x, pos_y = mon_pos.y;
-    pos_x += (mw - winWidth) / 2;
-    pos_y += (mh - winHeight) / 2;
-    SetWindowPosition(pos_x, pos_y);
+    winX = mon_pos.x;
+    winY = mon_pos.y;
+    winX += (mw - winWidth) / 2;
+    winY += (mh - winHeight) / 2;
+    SetWindowPosition(winX, winY);
 
 #ifndef __APPLE__
     /* Set an icon for the application */
     Image icon = LoadImageFromMemory(".png", s_app_icon_png, sizeof(s_app_icon_png));
     SetWindowIcon(icon);
 #endif
+
+#ifdef _WIN32
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-g") == 0) {
+            __declspec(dllimport) int __stdcall AllocConsole(void);
+            AllocConsole(); // Allocate a new console window
+            freopen("CONOUT$", "w", stdout); // Redirect stdout to it
+            freopen("CONOUT$", "w", stderr); // Redirect stderr
+            freopen("CONIN$", "r", stdin);   // Optional: redirect stdin
+        }
+    }
+#endif
 }
 
 
-int main(void) {
+int main(int argc, char* argv[]) {
     SetTraceLogLevel(LOG_WARNING);
-    setup_window();
+    setup_window(argc, argv);
 
     SetTargetFPS(60);
     popup_init(winWidth, winHeight);

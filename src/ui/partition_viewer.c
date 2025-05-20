@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 #include "raylib.h"
 #include "ui/statusbar.h"
 #include "ui/menubar.h"
@@ -15,6 +16,8 @@
 #define ENTRY_SIZE_LEN  14
 #define ENTRY_TYPE_LEN  12
 #define ENTRY_DATE_LEN  16
+
+#define CHECK_RW(ret)   do { if((ret) <= 0) { return (ret); } } while(0)
 
 typedef struct {
     char name[ENTRY_NAME_LEN + 2]; // +2 in case it's a directory, to add `/` and \0
@@ -51,20 +54,100 @@ static inline int chars_width_px(int n)
 
 static ssize_t partition_viewer_read(void* arg, void* buffer, uint32_t addr, size_t len)
 {
+    const size_t total = len;
+    uint8_t temp_sector[DISK_SECTOR_SIZE];
     partition_viewer_t* fs_ctx = (partition_viewer_t*) arg;
-    const off_t disk_offset = (off_t) fs_ctx->partition->start_lba * DISK_SECTOR_SIZE + addr;
+    off_t disk_offset = (off_t) fs_ctx->partition->start_lba * DISK_SECTOR_SIZE + addr;
+    ssize_t bytes_read = 0;
+
+    /* Check if addr is aligned to DISK_SECTOR_SIZE */
+    size_t offset = addr % DISK_SECTOR_SIZE;
+    if (offset != 0) {
+        /* Read the first unaligned sector */
+        const off_t first_sector_offset = disk_offset - offset;
+        bytes_read = disk_read(fs_ctx->disk_fd, temp_sector, first_sector_offset, DISK_SECTOR_SIZE);
+        CHECK_RW(bytes_read);
+
+        /* Copy the relevant part of the sector to the buffer */
+        const size_t unaligned_len = DISK_SECTOR_SIZE - offset;
+        const size_t bytes_to_copy = NK_MIN(len, unaligned_len);
+        memcpy(buffer, temp_sector + offset, bytes_to_copy);
+
+        /* Update the buffer, addr, and len */
+        len -= bytes_to_copy;
+        buffer += bytes_to_copy;
+        disk_offset += bytes_to_copy;
+    }
+
+    if (len == 0) {
+        return total;
+    }
+
     /* Read the sector from the disk */
-    return disk_read(fs_ctx->disk_fd, buffer, disk_offset, len);
+    bytes_read = disk_read(fs_ctx->disk_fd, buffer, disk_offset, len);
+    CHECK_RW(bytes_read);
+
+    return total;
+}
+
+static ssize_t read_write_sector(partition_viewer_t* fs_ctx, const void* buffer, off_t aligned_addr, off_t offset, size_t len)
+{
+    uint8_t temp_sector[DISK_SECTOR_SIZE];
+
+    /* Read the first unaligned sector and write it back */
+    // printf("read_write_sector:read: aligned_addr=0x%lx, offset=%lu, len=%u\n", aligned_addr, offset, len);
+    ssize_t bytes_read = disk_read(fs_ctx->disk_fd, temp_sector, aligned_addr, DISK_SECTOR_SIZE);
+    CHECK_RW(bytes_read);
+
+    /* Copy the relevant part of the sector to the buffer */
+    const size_t unaligned_len = DISK_SECTOR_SIZE - offset;
+    const size_t bytes_to_copy = NK_MIN(len, unaligned_len);
+    memcpy(temp_sector + offset, buffer, bytes_to_copy);
+
+    /* Write it back */
+    // printf("read_write_sector:write: aligned_addr=0x%lx, offset=%u, len=%u\n", aligned_addr, offset, DISK_SECTOR_SIZE);
+    ssize_t bytes_written = disk_write(fs_ctx->disk_fd, temp_sector, aligned_addr, DISK_SECTOR_SIZE);
+    CHECK_RW(bytes_written);
+
+    return bytes_to_copy;
 }
 
 
 static ssize_t partition_viewer_write(void* arg, const void* buffer, uint32_t addr, size_t len)
 {
+    const size_t total = len;
     partition_viewer_t* fs_ctx = (partition_viewer_t*) arg;
+    off_t disk_offset = (off_t) fs_ctx->partition->start_lba * DISK_SECTOR_SIZE + addr;
 
-    const off_t disk_offset = (off_t) fs_ctx->partition->start_lba * DISK_SECTOR_SIZE + addr;
-    /* Read the sector from the disk */
-    return disk_write(fs_ctx->disk_fd, buffer, disk_offset, len);
+    /* Check if addr is aligned to DISK_SECTOR_SIZE */
+    size_t offset = addr % DISK_SECTOR_SIZE;
+    if (offset != 0) {
+        const off_t first_sector_addr = disk_offset - offset;
+        ssize_t written = read_write_sector(fs_ctx, buffer, first_sector_addr, offset, len);
+        CHECK_RW(written);
+
+        /* Update the buffer, addr, and len */
+        len -= written;
+        buffer += written;
+        disk_offset += written;
+    }
+
+    /* Write in chunks of DISK_SECTOR_SIZE */
+    for (int i = 0; i < len / DISK_SECTOR_SIZE; i++) {
+        ssize_t written = read_write_sector(fs_ctx, buffer, disk_offset, 0, DISK_SECTOR_SIZE);
+        CHECK_RW(written);
+        buffer += DISK_SECTOR_SIZE;
+        disk_offset += DISK_SECTOR_SIZE;
+    }
+
+    /* Handle any remaining unaligned bytes */
+    len = len % DISK_SECTOR_SIZE;
+    if (len > 0) {
+        ssize_t written = read_write_sector(fs_ctx, buffer, disk_offset, 0, len);
+        CHECK_RW(written);
+    }
+
+    return total;
 }
 
 
@@ -353,8 +436,7 @@ static void import_file(void)
     }
 
     /* Check if the file name complies with the FS restrictions */
-    const char* filename = strrchr(file_path, '/');
-    filename = filename ? filename + 1 : file_path;
+    const char* filename = disk_get_basename(file_path);
     if (strlen(filename) > ENTRY_NAME_LEN) {
         filename = tinyfd_inputBox("Rename File", "File name is too long. Enter a new name (max 16 characters):", "");
         if (!filename || strlen(filename) == 0 || strlen(filename) > ENTRY_NAME_LEN) {
@@ -372,6 +454,9 @@ static void import_file(void)
         fclose(src_file);
         return;
     }
+
+    int remaining = file_size;
+    disk_init_progress_bar();
     while (1) {
         bytes_read = fread(buffer, 1, sizeof(buffer), src_file);
         if (bytes_read <= 0) {
@@ -383,8 +468,12 @@ static void import_file(void)
             fclose(src_file);
             return;
         }
+        remaining -= bytes_written;
+        int percentage = (int)(((file_size - remaining) * 100) / file_size);
+        disk_update_progress_bar(percentage);
         total_bytes_written += bytes_written;
     }
+    disk_destroy_progress_bar();
 
     /* Flush the changes on the disk */
     int err = zealfs_flush(&zealfs_ctx, &fd);

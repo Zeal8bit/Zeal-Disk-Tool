@@ -211,3 +211,19 @@ void disk_close(void* disk_fd)
 {
     close((int)(intptr_t) disk_fd);
 }
+
+
+void disk_init_progress_bar(void)
+{
+}
+
+
+void disk_update_progress_bar(int percent)
+{
+    (void) percent;
+}
+
+
+void disk_destroy_progress_bar(void)
+{
+}

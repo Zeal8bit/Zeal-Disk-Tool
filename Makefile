@@ -55,7 +55,7 @@ deploy32: $(TARGET)32
 WIN_CC=i686-w64-mingw32-gcc
 WIN_WINDRES=i686-w64-mingw32-windres
 WIN_CFLAGS=-O2 -Wall -Iinclude -Iraylib/win32/include -Lraylib/win32/lib
-WIN_LDFLAGS=-lraylib -lwinmm -lgdi32 -lole32 -static -mwindows
+WIN_LDFLAGS=-lraylib -lwinmm -lgdi32 -lole32 -lcomctl32 -static -mwindows
 WIN_TARGET=zeal_disk_tool.exe
 
 $(WIN_TARGET): src/disk_win.c $(COMMON_SRCS) appdir/zeal-disk-tool.res build/raylib-nuklear-win.o
