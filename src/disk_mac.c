@@ -200,6 +200,7 @@ ssize_t disk_read(void* disk_fd, void* buffer, off_t disk_offset, uint32_t len)
 ssize_t disk_write(void* disk_fd, const void* buffer, off_t disk_offset, uint32_t len)
 {
     uint8_t temp_buffer[512];
+    ssize_t bytes_written;
 
     int fd = (int)(intptr_t) disk_fd;
     if (lseek(fd, disk_offset, SEEK_SET) != disk_offset) {
@@ -211,7 +212,7 @@ ssize_t disk_write(void* disk_fd, const void* buffer, off_t disk_offset, uint32_
     const uint32_t remainder = len & (DISK_SECTOR_SIZE - 1);   // Remaining bytes
 
     for (int i = 0; i < aligned_len / DISK_SECTOR_SIZE; i++) {
-        ssize_t bytes_written = write(fd, buffer, DISK_SECTOR_SIZE);
+        bytes_written = write(fd, buffer, DISK_SECTOR_SIZE);
         if (bytes_written < 0) {
             fprintf(stderr, "[MAC] Could not write to disk: %s\n", strerror(errno));
             return -1;
@@ -236,7 +237,7 @@ ssize_t disk_write(void* disk_fd, const void* buffer, off_t disk_offset, uint32_
             fprintf(stderr, "[MAC] Could not seek to offset %lld: %s\n", aligned_offset, strerror(errno));
             return -1;
         }
-        ssize_t bytes_written = write(fd, temp_buffer, 512);
+        bytes_written = write(fd, temp_buffer, 512);
         if (bytes_written < 0) {
             fprintf(stderr, "[MAC] Could not write to disk: %s\n", strerror(errno));
             return -1;
