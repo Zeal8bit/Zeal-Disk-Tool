@@ -768,6 +768,8 @@ static int allocate_next(zealfs_context_t* ctx, zealfs_header_t* header, uint_fa
     }
     /* Link the newly allocated page to the current page */
     set_next_in_fat(ctx, current_page, next);
+    /* Set the new page as having no next page*/
+    set_next_in_fat(ctx, next, 0);
     return next;
 }
 
