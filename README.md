@@ -77,6 +77,12 @@ For example, if you installed linuxdeploy in the same directory as the makefile,
 LINUXDEPLOY=./linuxdeploy-x86_64.AppImage make deploy
 ```
 
+### MacOS / Darwin
+
+* Install Raylib via `homebrew install raylib`
+* Install XCode tools `xcode-select --install`, if not already installed
+* Type `make zeal_disk_tool.darwin.elf`
+
 ### Windows 32-bit (cross-compile static binary on Linux)
 
 * Install Raylib by downloading the release v5.5. from the [official Github release page](https://github.com/raysan5/raylib/releases/tag/5.5)
