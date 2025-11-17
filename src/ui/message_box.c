@@ -1,6 +1,4 @@
 #include "ui.h"
-#include "raylib.h"
-#include "nuklear.h"
 #include "raylib-nuklear.h"
 
 /* This should only be the case for windows, but keep the code just in case */

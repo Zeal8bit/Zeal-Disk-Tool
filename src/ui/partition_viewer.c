@@ -41,6 +41,7 @@ typedef struct {
 
 
 static partition_viewer_t m_part_ctx = {
+    /* The address bar MUST always end with a `/` */
     .address_bar = { '/', 0 }
 };
 
@@ -157,6 +158,20 @@ static zealfs_context_t zealfs_ctx = {
     .arg      = &m_part_ctx,
 };
 
+static void add_trailing_slash(char* path, size_t max_size)
+{
+    size_t len = strlen(path);
+    if (path[len - 1] != '/') {
+        /* We need to add one new character, make sure the max size is nig enough */
+        if (max_size == len + 1) {
+            printf("WARNING: max path length reached!\n");
+            return;
+        }
+        path[len] = '/';
+        path[len + 1] = 0;
+    }
+}
+
 
 static void remove_trailing_slash(char* path)
 {
@@ -169,11 +184,13 @@ static void remove_trailing_slash(char* path)
 }
 
 
-static int read_directory(char* path)
+static int read_directory(const char* path_ro)
 {
     zealfs_fd_t fd;
+    char path[MAX_PATH_LENGTH + 1];
 
     /* Remove trailing `/` if path is not `/` */
+    strncpy(path, path_ro, MAX_PATH_LENGTH);
     remove_trailing_slash(path);
 
     /* We have to create a context/arg for zealfs functions */
@@ -280,8 +297,8 @@ static void change_directory(const char* directory)
     char path[MAX_PATH_LENGTH];
     snprintf(path, MAX_PATH_LENGTH, "%s%s", m_part_ctx.address_bar, directory);
     if (read_directory(path) == 0) {
-        /* Success */
-        snprintf(m_part_ctx.address_bar, MAX_PATH_LENGTH, "%s/", path);
+        /* Success, the path already contains the trailing `/` since all dir entries have one */
+        snprintf(m_part_ctx.address_bar, MAX_PATH_LENGTH, "%s", path);
     }
 }
 
@@ -356,7 +373,7 @@ static void extract_selected_file(void)
 
     char* filename = m_part_ctx.entries[m_part_ctx.selected_file].name;
     /* Where to save the file */
-    char* destination = tinyfd_saveFileDialog("Choose a destination",
+    char* destination = tinyfd_saveFileDialog("Exporting file, choose a destination",
                                               filename, 0,
                                               NULL, NULL);
     if (destination == NULL) {
@@ -404,8 +421,7 @@ static void extract_selected_file(void)
     fclose(dest_file);
 }
 
-
-static void import_file(void)
+static int import_file(const char* file_path)
 {
     char path[MAX_PATH_LENGTH];
     uint8_t buffer[4096];
@@ -413,16 +429,10 @@ static void import_file(void)
     size_t total_bytes_written = 0;
     zealfs_fd_t fd;
 
-    const char* file_path = tinyfd_openFileDialog("Select a file to import", "", 0, NULL, NULL, 0);
-    if (!file_path) {
-        /* Operation cancelled */
-        return;
-    }
-
     FILE* src_file = fopen(file_path, "rb");
     if (!src_file) {
         ui_statusbar_printf("Could not open file %s\n", file_path);
-        return;
+        return 0;
     }
 
     /* Check if the file is bigger than the remaining space in the partition */
@@ -432,7 +442,7 @@ static void import_file(void)
     if (file_size > zealfs_free_space(&zealfs_ctx)) {
         ui_statusbar_print("Not enough space in the partition to import the file.");
         fclose(src_file);
-        return;
+        return 0;
     }
 
     /* Check if the file name complies with the FS restrictions */
@@ -442,7 +452,7 @@ static void import_file(void)
         if (!filename || strlen(filename) == 0 || strlen(filename) > ENTRY_NAME_LEN) {
             ui_statusbar_print("Invalid file name.");
             fclose(src_file);
-            return;
+            return 0;
         }
     }
 
@@ -452,7 +462,7 @@ static void import_file(void)
     if (ret < 0) {
         ui_statusbar_printf("Failed to create file %s: %s\n", filename, strerror(-ret));
         fclose(src_file);
-        return;
+        return 0;
     }
 
     int remaining = file_size;
@@ -466,7 +476,7 @@ static void import_file(void)
         if (bytes_written != bytes_read) {
             ui_statusbar_printf("Error writing to file %s in partition\n", filename);
             fclose(src_file);
-            return;
+            return 0;
         }
         remaining -= bytes_written;
         int percentage = (int)(((file_size - remaining) * 100) / file_size);
@@ -475,15 +485,46 @@ static void import_file(void)
     }
     disk_destroy_progress_bar();
 
+    fclose(src_file);
+
     /* Flush the changes on the disk */
     int err = zealfs_flush(&zealfs_ctx, &fd);
     if (err) {
         ui_statusbar_printf("Error flushing file %s\n", filename);
+        return 0;
     }
 
-    fclose(src_file);
+    return 1;
+}
 
-    ui_statusbar_printf("File %s imported (%zu bytes)\n", filename, total_bytes_written);
+
+static void import_files(void)
+{
+    const int allow_multiselect = 1;
+    const char* files_ro = tinyfd_openFileDialog("Select files to import", "", 0, NULL, NULL, allow_multiselect);
+    if (files_ro == NULL) {
+        /* Operation cancelled */
+        return;
+    }
+
+    /* The files will be separated with `|` character */
+    char *files = strdup(files_ro);
+    char *current = strtok(files, "|");
+    int success = 1;
+
+    while (current != NULL) {
+        success &= import_file(current);
+        if (!success) {
+            break;
+        }
+        current = strtok(NULL, "|");
+    }
+
+    if (success) {
+        ui_statusbar_printf("Files imported\n");
+    }
+
+    free(files);
     refresh_directory();
 }
 
@@ -531,9 +572,85 @@ static void ui_partition_viewer_show_usage(struct nk_context *ctx)
 }
 
 
+static void collapse_slashes(char *path)
+{
+    char *src = path;
+    char *dst = path;
+    int prev_was_slash = 0;
+
+    while (*src) {
+        if (*src == '/') {
+            if (!prev_was_slash) {
+                *dst++ = '/';
+                prev_was_slash = 1;
+            }
+        } else {
+            *dst++ = *src;
+            prev_was_slash = 0;
+        }
+        src++;
+    }
+    *dst = '\0';
+}
+
+
+/**
+ * @brief Parse and try to access the directory typed by the user
+ */
+static int read_user_bar_directory(char path[MAX_PATH_LENGTH + 1])
+{
+    if (path[0] == 0) {
+        /* Path is empty! */
+        path[0] = '/';
+        path[1] = 0;
+    } else {
+        /* Sanitize the path by removing the multiple slashes */
+        collapse_slashes(path);
+    }
+
+    if (read_directory(path) == 0) {
+        /* Both the strings must have a trailing `/` */
+        add_trailing_slash(path, MAX_PATH_LENGTH + 1);
+        snprintf(m_part_ctx.address_bar, MAX_PATH_LENGTH, "%s", path);
+        return 1;
+    }
+
+    return 0;
+}
+
+
+static bool nk_item_double_clicked(struct nk_context *ctx, struct nk_rect bounds, int item_id)
+{
+    static int last_item_clicked = -1;
+    static double last_click_time = 0.0;
+    static bool last_pressed = false;
+
+    bool pressed = nk_input_is_mouse_pressed(&ctx->input, NK_BUTTON_LEFT) &&
+                   nk_input_is_mouse_hovering_rect(&ctx->input, bounds);
+    bool double_clicked = false;
+
+    /* Edge detection */
+    if (pressed && !last_pressed) {
+        /* The current item has a mouse-pressed event, and didn't have it a frame ago */
+        double now = GetTime();
+        double elapsed = now - last_click_time;
+
+        /* If the previous mouse-pressed event was on the same element and within 400ms, it's a double-click! */
+        if (last_item_clicked == item_id && elapsed < 0.4) {
+            double_clicked = true;
+        }
+
+        last_click_time = now;
+        last_item_clicked = item_id;
+    }
+
+    last_pressed = pressed;
+    return double_clicked;
+}
+
 int ui_partition_viewer(struct nk_context *ctx, disk_info_t* disk, int partition_idx, struct nk_rect bounds)
 {
-    static char user_address_bar[MAX_PATH_LENGTH];
+    static char user_address_bar[MAX_PATH_LENGTH + 1];
 
     /* Check if we just switched partitions */
     partition_t* part = NULL;
@@ -543,7 +660,7 @@ int ui_partition_viewer(struct nk_context *ctx, disk_info_t* disk, int partition
 
     if (part != m_part_ctx.partition) {
         partition_viewer_parse(disk, part);
-        strncpy(user_address_bar, m_part_ctx.address_bar, MAX_PATH_LENGTH);
+        snprintf(user_address_bar, MAX_PATH_LENGTH, "%s", m_part_ctx.address_bar);
     }
 
     if (nk_begin(ctx, "Partition viewer", bounds, NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_BORDER | NK_WINDOW_TITLE))
@@ -561,7 +678,7 @@ int ui_partition_viewer(struct nk_context *ctx, disk_info_t* disk, int partition
             extract_selected_file();
         }
         if (nk_button_label(ctx, "Import")) {
-            import_file();
+            import_files();
         }
         if (nk_button_label(ctx, "New dir")) {
             create_directory();
@@ -573,18 +690,16 @@ int ui_partition_viewer(struct nk_context *ctx, disk_info_t* disk, int partition
         nk_layout_row(ctx, NK_DYNAMIC, 30, 3, (float[]){0.1f, 0.7f, 0.19f});
         if (nk_button_label(ctx, "Up")) {
             go_up_directory();
-            strncpy(user_address_bar, m_part_ctx.address_bar, MAX_PATH_LENGTH);
+            snprintf(user_address_bar, MAX_PATH_LENGTH, "%s", m_part_ctx.address_bar);
         }
 
         nk_flags flags = nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD | NK_EDIT_SIG_ENTER,
                                 user_address_bar, MAX_PATH_LENGTH,
                                 nk_filter_default);
-        if (nk_button_label(ctx, "Go") || (flags & NK_EDIT_COMMITED)) {
-            if (read_directory(user_address_bar) == 0) {
-                strncpy(m_part_ctx.address_bar, user_address_bar, MAX_PATH_LENGTH);
-            } else {
-                ui_statusbar_printf("Invalid path %s\n", user_address_bar);
-            }
+        if ((nk_button_label(ctx, "Go") || (flags & NK_EDIT_COMMITED)) &&
+             !read_user_bar_directory(user_address_bar))
+        {
+            ui_statusbar_printf("Invalid path %s\n", user_address_bar);
         }
 
         struct nk_rect bounds = nk_window_get_content_region(ctx);
@@ -637,24 +752,13 @@ int ui_partition_viewer(struct nk_context *ctx, disk_info_t* disk, int partition
                     m_part_ctx.selected_file = i;
                 }
 
-                bool clicked = nk_input_mouse_clicked(&ctx->input, NK_BUTTON_LEFT, bounds);
-                if (clicked) {
-                    /* Try to detect a double-click on the same item in the view */
-                    static double last_click_time = 0.0;
-                    static int last_item_clicked = 0;
-                    const uint32_t now = GetTime();
-                    const double elapsed = now - last_click_time;
-                    if (last_item_clicked == m_part_ctx.selected_file && elapsed < 0.4)
-                    {
-                        if (m_part_ctx.entries_raw[i].flags & 1) {
-                            change_directory(m_part_ctx.entries[i].name);
-                            strncpy(user_address_bar, m_part_ctx.address_bar, MAX_PATH_LENGTH);
-                        } else {
-                            extract_selected_file();
-                        }
+                if (nk_item_double_clicked(ctx, bounds, i)) {
+                    if (m_part_ctx.entries_raw[i].flags & 1) {
+                        change_directory(m_part_ctx.entries[i].name);
+                        snprintf(user_address_bar, MAX_PATH_LENGTH, "%s", m_part_ctx.address_bar);
+                    } else {
+                        extract_selected_file();
                     }
-                    last_click_time = now;
-                    last_item_clicked = m_part_ctx.selected_file;
                 }
             }
             nk_style_pop_vec2(ctx);

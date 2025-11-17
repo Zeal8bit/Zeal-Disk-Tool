@@ -6,7 +6,7 @@
 #pragma once
 
 #include <stdint.h>
-#include "nuklear.h"
+#include "raylib-nuklear.h"
 
 #define STATUSBAR_MSG_LEN   512
 
