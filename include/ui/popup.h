@@ -7,7 +7,7 @@
 #define POPUP_H
 
 #include <stdint.h>
-#include "nuklear.h"
+#include "raylib-nuklear.h"
 
 #define POPUP_COUNT    5
 

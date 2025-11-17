@@ -10,8 +10,6 @@
 #include <inttypes.h>
 #include "app_version.h"
 #include "app_icon.h"
-#include "raylib.h"
-#include "nuklear.h"
 #include "raylib-nuklear.h"
 #include "disk.h"
 

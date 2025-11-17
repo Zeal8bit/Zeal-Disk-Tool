@@ -8,7 +8,7 @@
 
 #include <stdint.h>
 #include "disk.h"
-#include "nuklear.h"
+#include "raylib-nuklear.h"
 
 #define MENUBAR_HEIGHT  30
 

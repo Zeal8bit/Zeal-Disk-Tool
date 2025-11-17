@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <assert.h>
 
-#include "nuklear.h"
 #include "raylib-nuklear.h"
 #include "raylib.h"
 #include "ui.h"

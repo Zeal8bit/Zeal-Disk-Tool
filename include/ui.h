@@ -6,7 +6,6 @@
 #pragma once
 
 #include "disk.h"
-#include "nuklear.h"
 #include "raylib-nuklear.h"
 
 #define MIN_WIN_WIDTH   800
