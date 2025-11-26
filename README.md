@@ -92,15 +92,54 @@ xcode-select --install
 ...
 ```
 
-- Install `mingw` toolchain, on Ubuntu, you can use the command `sudo apt install mingw-w64`
+- Install `mingw` toolchain, on Ubuntu, you can use the command `sudo apt install gcc-mingw-w64-i686`
+
+#### Windows 64-bit (cross-compile static binary on Linux)
+
+- Install Raylib by downloading the release v5.5. from the [official Github release page](https://github.com/raysan5/raylib/releases/tag/5.5)
+- Extract the downloaded archive in `raylib/win64`. The structure should look like:
+
+```shell
+├── LICENSE
+├── Makefile
+├── raylib
+│   └── win64
+│       ├── include
+│       └── lib
+├── README.md
+├── src
+...
+```
+
+- Install `mingw` toolchain, on Ubuntu, you can use the command `sudo apt install gcc-mingw-w64-x86-64`
 
 ### Compile
 
-This project uses CMake
+#### Natively
+
+This project uses CMake, to compile for your host computer, use the following commands:
 
 ```shell
 cmake -B build
 cmake --build build
+```
+
+#### Cross-compiling for Windows
+
+This project provides CMake toolchain files for building both 32-bit and 64-bit Windows binaries using mingw-w64 toolchain:
+
+**32-bit target:**
+
+```
+cmake -B build-win32 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-win32.cmake
+cmake --build build-win32
+```
+
+**64-bit target:**
+
+```
+cmake -B build-win64 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-win64.cmake
+cmake --build build-win64
 ```
 
 ### Package / Install
