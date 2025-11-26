@@ -19,7 +19,6 @@ The current version is compatible with Windows and Linux.
 - Simple graphical interface built with [Raylib](https://www.raylib.com/) and Nuklear
 - To protect internal/unrelated disks, disks over 64GB will be hidden and cannot be modified
 
-
 > ⚠️ Disclaimer: **Use at your own risk.** Zeal Disk Tool modifies disk images and may interact with physical drives if misused. I am not responsible for any data loss, disk corruption, or damage caused by the use or misuse of this tool. Always back up important data before working with disk images.
 
 ## IMPORTANT
@@ -36,15 +35,16 @@ The goal of Zeal Disk Tool is to offer a user-friendly, cross-platform graphical
 
 ## Building
 
-This project has been developed for Linux host initially, but it can also be cross-compiled to target Windows thanks to `i686-w64-mingw32-gcc` compiler.
+This project has been developed for Linux/Mac hosts initially, but it can also be cross-compiled to target Windows thanks to `i686-w64-mingw32-gcc` compiler.
 
-### Linux (dynamic binary)
+### Prerequisites
 
-#### Compiling the ELF binary
+#### Linux (dynamic binary)
 
-* Install Raylib by downloading the release v5.5. from the [official Github release page](https://github.com/raysan5/raylib/releases/tag/5.5)
-* Extract the downloaded archive in `raylib/linux32` or `raylib/linux` directory, for 32-bit or 64-bit version respectively. The structure should look like:
-```
+- Install Raylib by downloading the release v5.5. from the [official Github release page](https://github.com/raysan5/raylib/releases/tag/5.5)
+- Extract the downloaded archive in `raylib/linux32` or `raylib/linux` directory, for 32-bit or 64-bit version respectively. The structure should look like:
+
+```shell
 ├── LICENSE
 ├── Makefile
 ├── raylib
@@ -58,36 +58,29 @@ This project has been developed for Linux host initially, but it can also be cro
 ├── src
 ...
 ```
-* Install `gcc` if you don't have it
-* Type `make`
 
-That's it, the ELF file `zeal_disk_tool.elf` should be generated!
+- Install `gcc` if you don't have it
 
-#### Generating an AppImage
+#### MacOS / Darwin
 
-The provided makefile can also be used to generate an AppImage, to do so, install linuxdeploy from [the official Github page](https://github.com/linuxdeploy/linuxdeploy/releases). Then, use the following command:
+- Install Raylib via home
 
-```
-LINUXDEPLOY=<path to linuxdeploy> make deploy
+```shell
+homebrew install raylib
 ```
 
-For example, if you installed linuxdeploy in the same directory as the makefile, use:
+- Install XCode tools, if not already installed
 
+```shell
+xcode-select --install
 ```
-LINUXDEPLOY=./linuxdeploy-x86_64.AppImage make deploy
-```
 
-### MacOS / Darwin
+#### Windows 32-bit (cross-compile static binary on Linux)
 
-* Install Raylib via `homebrew install raylib`
-* Install XCode tools `xcode-select --install`, if not already installed
-* Type `make zeal_disk_tool.darwin.elf`
+- Install Raylib by downloading the release v5.5. from the [official Github release page](https://github.com/raysan5/raylib/releases/tag/5.5)
+- Extract the downloaded archive in `raylib/win32`. The structure should look like:
 
-### Windows 32-bit (cross-compile static binary on Linux)
-
-* Install Raylib by downloading the release v5.5. from the [official Github release page](https://github.com/raysan5/raylib/releases/tag/5.5)
-* Extract the downloaded archive in `raylib/win32`. The structure should look like:
-```
+```shell
 ├── LICENSE
 ├── Makefile
 ├── raylib
@@ -98,10 +91,47 @@ LINUXDEPLOY=./linuxdeploy-x86_64.AppImage make deploy
 ├── src
 ...
 ```
-* Install `mingw` toolchain, on Ubuntu, you can use the command `sudo apt install mingw-w64`
-* Type `make zeal_disk_tool.exe`
-* Voilà!
 
+- Install `mingw` toolchain, on Ubuntu, you can use the command `sudo apt install mingw-w64`
+
+### Compile
+
+This project uses CMake
+
+```shell
+cmake -B build
+cmake --build build
+```
+
+### Package / Install
+
+The provided CMake configuration can automatically create an AppImage or MacOS App bundle.
+
+To create an AppImage/AppBundle, you can use the `package` target
+
+```shell
+cmake --build build --target package
+```
+
+To install to the default location (`~/Applications` on MacOS)
+
+```shell
+cmake --build build --target install
+```
+
+#### Bundler Prerequisities
+
+##### Linux AppImage
+
+- Install linuxdeploy from [the official Github page](https://github.com/linuxdeploy/linuxdeploy/releases).
+
+##### MacOS App Bundle
+
+- Install xcode command line tools
+
+```shell
+xcode-select --install
+````
 
 ## License
 

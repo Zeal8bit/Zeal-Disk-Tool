@@ -53,31 +53,45 @@ target_link_directories(zeal_disk_tool PRIVATE ${RAYLIB_LIBRARY_DIR})
 # Libraries to link to DiskTool regardless of the OS we are building for
 target_link_libraries(zeal_disk_tool PRIVATE raylib m)
 
+# Include platform-specific options
 if(PLATFORM STREQUAL "linux")
     target_compile_options(zeal_disk_tool PRIVATE "-Wno-format-truncation")
+    include(packages/appimage.cmake)
+    # General install target for Linux
+    add_custom_target(package
+        DEPENDS linux_appimage
+        COMMENT "Building Linux package"
+    )
+elseif(PLATFORM STREQUAL "mac")
+    include(packages/darwin.cmake)
+    # General install target for macOS
+    add_custom_target(package
+        DEPENDS mac_app
+        COMMENT "Building macOS package"
+    )
 elseif(PLATFORM STREQUAL "win")
     # Windows icon .res
     add_custom_command(
         OUTPUT ${CMAKE_BINARY_DIR}/zeal-disk-tool.res
         COMMAND ${CMAKE_RC_COMPILER}
-                ${CMAKE_SOURCE_DIR}/appdir/zeal-disk-tool.rc
+                ${CMAKE_SOURCE_DIR}/packages/icons/zeal-disk-tool.rc
                 -O coff -o ${CMAKE_BINARY_DIR}/zeal-disk-tool.res
-        DEPENDS appdir/zeal-disk-tool.rc appdir/zeal-disk-tool.ico)
+        DEPENDS packages/icons/zeal-disk-tool.rc packages/icons/zeal-disk-tool.ico)
     # For Windows, we need to link a bit more libraries
     target_link_libraries(zeal_disk_tool PRIVATE winmm gdi32 ole32 comctl32)
     # Make the Windows target static, as such, no need for any .dll file
     target_link_options(zeal_disk_tool PRIVATE -static -mwindows)
 endif()
 
-# Deploy targets (AppImage), only for Linux
-add_custom_target(deploy
-    COMMAND cp -R ${CMAKE_SOURCE_DIR}/appdir ${CMAKE_BINARY_DIR}/
-    COMMAND cp $<TARGET_FILE:zeal_disk_tool> ${CMAKE_BINARY_DIR}/appdir/zeal_disk_tool
-    # Needs linuxdeploy binary in PATH
-    COMMAND linuxdeploy --appdir AppDeploy
-                        --executable=appdir/zeal_disk_tool
-                        --desktop-file appdir/zeal-disk-tool.desktop
-                        --icon-file appdir/zeal-disk-tool.png
-                        --output appimage
-    DEPENDS zeal_disk_tool
+# Clean deployment artifacts - this will run automatically before clean
+set_directory_properties(PROPERTIES ADDITIONAL_MAKE_CLEAN_FILES
+    "${CMAKE_SOURCE_DIR}/ZealDiskTool.app;${CMAKE_SOURCE_DIR}/packages/macos/zeal-disk-tool.icns;${CMAKE_BINARY_DIR}/packages;${CMAKE_SOURCE_DIR}/zeal_disk_tool;${CMAKE_SOURCE_DIR}/zeal_disk_tool.exe"
 )
+
+# Additional manual clean for wildcard files
+add_custom_target(clean_all
+    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target clean
+    COMMAND bash -c "rm -f ${CMAKE_SOURCE_DIR}/*.AppImage"
+    COMMENT "Cleaning all build and deployment artifacts"
+)
+
