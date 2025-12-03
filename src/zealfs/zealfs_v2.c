@@ -142,7 +142,12 @@ static uint16_t get_next_from_fat(zealfs_context_t* ctx, uint16_t current_page)
 {
     const zealfs_header_t* header = (zealfs_header_t*) ctx->header;
     assert(header->magic != 0);
-    return ctx->fat[current_page];
+    if (header->page_size == 0) {
+        /* 256-byte pages */
+        return ((uint8_t*) ctx->fat)[current_page];
+    } else {
+        return ctx->fat[current_page];
+    }
 }
 
 
@@ -153,7 +158,12 @@ static void set_next_in_fat(zealfs_context_t* ctx, uint16_t current_page, uint16
 {
     const zealfs_header_t* header = (zealfs_header_t*) ctx->header;
     assert(header->magic != 0);
-    ctx->fat[current_page] = next_page;
+    if (header->page_size == 0) {
+        /* 256-byte pages */
+        ((uint8_t*) ctx->fat)[current_page] = next_page;
+    } else {
+        ctx->fat[current_page] = next_page;
+    }
 }
 
 
