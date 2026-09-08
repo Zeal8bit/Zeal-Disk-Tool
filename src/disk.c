@@ -550,25 +550,10 @@ static bool disk_image_opened(disk_list_state_t* state, const char* path, int* i
 }
 
 
-int disk_open_image_file(disk_list_state_t* state)
+int disk_open_image_file_path(disk_list_state_t* state, const char* file_path)
 {
     if (state->disk_count >= MAX_DISKS) {
         ui_statusbar_print("Maximum number of disks reached!");
-        return -1;
-    }
-
-    const char* filter_patterns[] = { "*.img" };
-    const char* file_path = tinyfd_openFileDialog(
-        "Open Disk Image",
-        "",
-        1,
-        filter_patterns,
-        "Disk Image Files",
-        0
-    );
-
-    if (!file_path) {
-        ui_statusbar_print("No file selected");
         return -1;
     }
 
@@ -615,6 +600,32 @@ int disk_open_image_file(disk_list_state_t* state)
     ui_statusbar_print("Disk image loaded successfully!");
 
     return state->disk_count - 1;
+}
+
+
+int disk_open_image_file(disk_list_state_t* state)
+{
+    if (state->disk_count >= MAX_DISKS) {
+        ui_statusbar_print("Maximum number of disks reached!");
+        return -1;
+    }
+
+    const char* filter_patterns[] = { "*.img" };
+    const char* file_path = tinyfd_openFileDialog(
+        "Open Disk Image",
+        "",
+        1,
+        filter_patterns,
+        "Disk Image Files",
+        0
+    );
+
+    if (!file_path) {
+        ui_statusbar_print("No file selected");
+        return -1;
+    }
+
+    return disk_open_image_file_path(state, file_path);
 }
 
 

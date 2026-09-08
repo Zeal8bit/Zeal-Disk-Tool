@@ -622,7 +622,27 @@ static void setup_window(int argc, char* argv[]) {
 }
 
 
+static void print_usage(const char* prog)
+{
+    printf("Usage: %s [options] [<disk.img>]\n", prog);
+    printf("Options:\n");
+    printf("  -h        Show this help message\n");
+    printf("  <disk.img>  Load a disk image file on startup\n");
+#ifdef _WIN32
+    printf("  -g        Allocate a console window (Windows only)\n");
+#endif
+}
+
+
 int main(int argc, char* argv[]) {
+    /* Parse flags before initializing anything */
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-h") == 0) {
+            print_usage(argv[0]);
+            return 0;
+        }
+    }
+
     SetTraceLogLevel(LOG_WARNING);
     setup_window(argc, argv);
 
@@ -637,6 +657,38 @@ int main(int argc, char* argv[]) {
         return 1;
     } else if (err == ERR_NOT_ADMIN) {
         return message_box(ctx, "You must run this program as Administrator!\n");
+    }
+
+    /* Check for optional command-line .img file argument */
+    disk_list_state_t* state = disk_get_state();
+    for (int i = 1; i < argc; i++) {
+        const char* arg = argv[i];
+        /* Skip flags */
+        if (arg[0] == '-') {
+            continue;
+        }
+        /* Determine if the file is an image based on extension (.img) */
+        const char* dot = strrchr(arg, '.');
+        int is_img = 0;
+        if (dot && dot[1] != '\0') {
+            const char* ext = dot + 1;
+            is_img = (ext[0] == 'i' || ext[0] == 'I') &&
+                     (ext[1] == 'm' || ext[1] == 'M') &&
+                     (ext[2] == 'g' || ext[2] == 'G') &&
+                     ext[3] == '\0';
+        }
+        if (!is_img) {
+            fprintf(stderr, "Error: '%s' is not a .img file. Only .img disk images are supported.\n", arg);
+            break;
+        }
+        int new_idx = disk_open_image_file_path(state, arg);
+        /* Select the newly opened disk if successful */
+        if (new_idx >= 0) {
+            state->selected_disk = new_idx;
+            state->selected_partition = -1;
+        }
+        /* Only process the first positional argument */
+        break;
     }
 
     const int fontSize = 13;

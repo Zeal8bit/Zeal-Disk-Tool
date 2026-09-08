@@ -162,7 +162,21 @@ const char* disk_write_changes(disk_info_t* disk);
  */
 int disk_open_image_file(disk_list_state_t* state);
 
+/**
+ * @brief Open a disk image file from a given path and add it to the disk list.
+ *
+ * Unlike disk_open_image_file, this function does not prompt the user with
+ * a file dialog. It directly opens the file at the given path.
+ *
+ * @param state A pointer to the disk list state where the disk image will be added.
+ * @param path  Path to the image file to open.
+ * @return int The index of the newly added disk on success, or a negative value on error.
+ */
+int disk_open_image_file_path(disk_list_state_t* state, const char* path);
+
 int disk_create_image(disk_list_state_t* state, const char* path, uint64_t size, bool init_mbr);
+
+
 
 
 /**
