@@ -1,6 +1,6 @@
 function(generate_version_header out)
     execute_process(
-        COMMAND git describe --always
+        COMMAND git -c "safe.directory=${CMAKE_SOURCE_DIR}" describe --always
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         RESULT_VARIABLE _git_result
         OUTPUT_VARIABLE GIT_VERSION

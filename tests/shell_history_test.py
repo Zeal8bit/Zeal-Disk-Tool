@@ -8,6 +8,7 @@ import termios
 import time
 
 exe = sys.argv[1]
+expected_version = subprocess.check_output([exe, '--version']).strip()
 master, slave = pty.openpty()
 before = termios.tcgetattr(slave)
 child = subprocess.Popen([exe, 'shell'], stdin=slave, stdout=slave, stderr=slave)
@@ -39,11 +40,11 @@ try:
     send(b'\x1b[A')
     expect(shown(b'version'))
     send(b'\n')
-    assert b'v0.' in expect(prompt)
+    assert expected_version in expect(prompt)
     send(b'vers\x1b[A\x1b[B')
     expect(shown(b'vers'))
     send(b'ion\n')
-    assert b'v0.' in expect(prompt)
+    assert expected_version in expect(prompt)
     # Clear with Ctrl-U, edit a recalled line, and cancel with Ctrl-C.
     send(b'\x1b[A\x01\x1b[3~')
     expect(b'zdt> \x1b7ersion\x1b8')

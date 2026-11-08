@@ -135,17 +135,17 @@ FILE* zfs_temp_sibling(const char* path, char* out, size_t capacity)
 int zfs_host_publish(const char* temporary, const char* path, bool overwrite)
 {
     wchar_t *a = wide(temporary), *b = wide(path);
-    BOOL ok = FALSE;
-    if (a && b) {
-        DWORD attrs = GetFileAttributesW(b);
-        if (overwrite && attrs != INVALID_FILE_ATTRIBUTES) {
-            ok = ReplaceFileW(b, a, NULL, 0, NULL, NULL);
-        } else {
-            ok = MoveFileExW(a, b, MOVEFILE_WRITE_THROUGH);
-        }
-    }
+    /* ReplaceFile opens the replacement without sharing, which conflicts with
+     * the retained/locked image handle. Same-volume rename permits that handle
+     * to stay open with FILE_SHARE_DELETE through publication. */
+    DWORD flags = MOVEFILE_WRITE_THROUGH | (overwrite ? MOVEFILE_REPLACE_EXISTING : 0);
+    BOOL ok = a && b && MoveFileExW(a, b, flags);
+    DWORD failure = GetLastError();
     free(a);
     free(b);
+    if (!ok) {
+        SetLastError(failure);
+    }
     return ok ? 0 : -1;
 }
 #else

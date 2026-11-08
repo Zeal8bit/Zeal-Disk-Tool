@@ -601,7 +601,12 @@ zfs_status zfs_apply(zfs_disk* d, zfs_error* e)
                 d->base = NULL;
             }
             if (zfs_host_publish(temporary, d->info.path, !d->info.new_image)) {
+#ifdef _WIN32
+                s = zfs_error_set(e, ZFS_IO, "Cannot publish image (Windows error %lu)",
+                                  (unsigned long) GetLastError());
+#else
                 s = zfs_error_set(e, ZFS_IO, "Cannot publish image (destination exists or replacement failed)");
+#endif
                 if (!d->info.new_image) {
                     d->base = zfs_host_open(d->info.path, "rb");
                     d->guarded = false;
