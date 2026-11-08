@@ -2,6 +2,7 @@
 #include "cli.h"
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* In-place tokenizer: quotes group arguments; backslashes stay literal except
@@ -50,28 +51,34 @@ int cli_shell(cli_session *s, const cli_options *initial) {
     }
     s->shell = true;
     bool terminal = cli_is_terminal();
-    char line[8192];
+    cli_history *history = calloc(1, sizeof(*history));
+    if (!history)
+        return cli_failure(initial, 1, "out of memory", "Cannot allocate shell history");
+    /* Keep terminal editing and confirmation reads on the same input stream. */
+    if (terminal)
+        setvbuf(stdin, NULL, _IONBF, 0);
+    char line[CLI_LINE_CAPACITY];
     int result = 0;
     if (terminal)
         fputs("Zeal Disk Tool shell. Use help for commands; changes require apply.\n", stderr);
     for (;;) {
-        if (terminal) {
-            fputs("zdt> ", stderr);
-            fflush(stderr);
+        cli_input input = cli_readline(history, line, terminal);
+        if (input == CLI_INPUT_ERROR) {
+            result = cli_failure(initial, 1, "input", "Cannot read shell input");
+            break;
         }
-        if (!fgets(line, sizeof(line), stdin)) {
+        if (input == CLI_INPUT_EOF) {
             if (s->disk && zfs_get_info(s->disk)->pending) {
                 result = cli_failure(initial, 3, "confirmation", "End of input: pending changes discarded");
             }
             break;
         }
-        if (!strchr(line, '\n') && !feof(stdin)) {
-            int c;
-            while ((c = getchar()) != '\n' && c != EOF) {
-            }
+        if (input == CLI_INPUT_LONG) {
             result = cli_failure(initial, 2, "usage", "Input line is too long");
             continue;
         }
+        if (terminal)
+            cli_history_add(history, line);
         char *args[CLI_MAX_ARGS];
         int argc = tokenize(line, args);
         if (argc < 0) {
@@ -82,7 +89,7 @@ int cli_shell(cli_session *s, const cli_options *initial) {
             continue;
         cli_options o;
         char error[256];
-        if (!cli_parse(argc, args, &o, error, sizeof(error))) {
+        if (!cli_parse_shell(argc, args, &o, error, sizeof(error))) {
             result = cli_failure(&o, 2, "usage", error);
             continue;
         }
@@ -101,5 +108,6 @@ int cli_shell(cli_session *s, const cli_options *initial) {
         if (r)
             result = r;
     }
+    free(history);
     return result;
 }

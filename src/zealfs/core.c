@@ -1,35 +1,15 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-#include "internal.h"
+#include "disk_private.h"
 #include "zealfs_v2.h"
 #include <errno.h>
+#include <stddef.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#ifdef _WIN32
-#include <io.h>
-#define fstat _fstat64
-#define stat _stat64
-#define fileno _fileno
-#endif
 #define SECTOR 512u
 #define MAX_PART_SIZE (UINT64_C(4) * 1024 * 1024 * 1024)
 
-struct zfs_disk {
-    zfs_info info, original;
-    FILE *base, *overlay, *undo;
-    zfs_native device;
-    unsigned char *dirty;
-    uint64_t dirty_count, undo_count;
-    size_t bitmap_size;
-    zfs_callbacks callbacks;
-    bool usage_cached[4];
-    uint64_t free_cache[4], total_cache[4];
-    struct stat stamp;
-#ifdef _WIN32
-    BY_HANDLE_FILE_INFORMATION win_stamp;
-#endif
-};
 typedef struct {
     uint64_t sector;
     bool dirty;
@@ -52,7 +32,8 @@ const char *zfs_status_string(zfs_status s) {
                                   "out of memory",
                                   "busy",
                                   "corrupt filesystem",
-                                  "partial device write"};
+                                  "partial device write",
+                                  "type conflict"};
     return (unsigned)s < sizeof(names) / sizeof(*names) ? names[s] : "unknown error";
 }
 zfs_status zfs_error_set(zfs_error *e, zfs_status code, const char *format, ...) {
@@ -177,6 +158,8 @@ static zfs_status finish(zfs_disk *d, zfs_status s, zfs_error *e) {
     d->undo = NULL;
     d->undo_count = 0;
     d->info.pending = d->info.new_image || d->dirty_count > 0;
+    if (!s)
+        ++d->revision;
     return s;
 }
 static uint32_t le32(const unsigned char *p) {
@@ -191,7 +174,10 @@ static zfs_status parse(zfs_disk *d, zfs_error *e) {
     zfs_status s = read_sector(d, 0, sector, e);
     if (s)
         return s;
-    d->info.has_mbr = sector[510] == 0x55 && sector[511] == 0xaa;
+    /* A raw ZealFS header takes precedence over incidental 55aa bytes in its
+     * root entries/FAT; partition backups are raw images, not MBR sectors. */
+    bool raw = sector[0] == 'Z' && sector[1] == 2 && sector[6] <= 8;
+    d->info.has_mbr = !raw && sector[510] == 0x55 && sector[511] == 0xaa;
     memset(d->info.partitions, 0, sizeof(d->info.partitions));
     if (!d->info.has_mbr) {
         if (sector[0] == 'Z' && sector[1] == 2)
@@ -324,13 +310,14 @@ zfs_status zfs_image_create(const char *path, uint64_t size, bool mbr, zfs_disk 
 void zfs_close(zfs_disk *d) {
     if (!d)
         return;
-    if (d->base)
+    if (d->base && !d->borrowed_base)
         fclose(d->base);
     if (d->overlay)
         fclose(d->overlay);
     if (d->undo)
         fclose(d->undo);
-    zfs_native_close(d->device);
+    if (!d->borrowed_base)
+        zfs_native_close(d->device);
     free(d->dirty);
     free(d);
 }
@@ -360,6 +347,9 @@ zfs_status zfs_discard(zfs_disk *d, zfs_error *e) {
     memset(d->usage_cached, 0, sizeof(d->usage_cached));
     /* Discard cancels creation; a later mutation can stage it again. */
     d->info.pending = false;
+    d->verified_apply = false;
+    d->recovery_backup[0] = 0;
+    ++d->revision;
     return ZFS_OK;
 }
 static bool file_identity(FILE *a, FILE *b) {
@@ -400,6 +390,50 @@ static bool same_image(zfs_disk *d) {
         fclose(f);
     return same;
 }
+static zfs_native image_handle(FILE *file);
+static zfs_status verify_staged(zfs_disk *d, FILE *file, zfs_native device, zfs_error *e) {
+    unsigned char expected[SECTOR], actual[SECTOR];
+    for (uint64_t i = 0; i < d->info.size / SECTOR; ++i)
+        if (dirty(d, i)) {
+            zfs_status s = read_sector(d, i, expected, e);
+            if (s)
+                return s;
+            if (file) {
+                if (zfs_seek(file, i * SECTOR) || fread(actual, 1, SECTOR, file) != SECTOR)
+                    return zfs_error_set(e, ZFS_IO, "Cannot read back staged image");
+            } else {
+                s = zfs_native_read(device, i * SECTOR, actual, SECTOR, e);
+                if (s)
+                    return s;
+            }
+            if (memcmp(expected, actual, SECTOR))
+                return zfs_error_set(e, ZFS_IO, "Write verification failed at sector %llu",
+                                     (unsigned long long)i);
+        }
+    return ZFS_OK;
+}
+static zfs_status verify_original_device(zfs_disk *d, zfs_error *e) {
+    FILE *backup = zfs_host_open(d->recovery_backup, "rb");
+    if (!backup)
+        return zfs_error_set(e, ZFS_IO, "Cannot open retained backup for pre-commit verification");
+    unsigned char original[65536], actual[65536];
+    zfs_status s = ZFS_OK;
+    for (uint64_t at = 0; !s && at < d->recovery_size; at += sizeof(original)) {
+        size_t n =
+            d->recovery_size - at < sizeof(original) ? (size_t)(d->recovery_size - at) : sizeof(original);
+        if (fread(original, 1, n, backup) != n)
+            s = zfs_error_set(e, ZFS_IO, "Retained backup is truncated or unreadable");
+        if (!s)
+            s = zfs_native_read(d->device, d->recovery_offset + at, actual, n, e);
+        if (!s && memcmp(original, actual, n))
+            s = zfs_error_set(e, ZFS_BUSY,
+                              "Target or backup changed since preparation; no target sectors were written");
+    }
+    if (!s && fgetc(backup) != EOF)
+        s = zfs_error_set(e, ZFS_INVALID, "Retained backup size changed");
+    fclose(backup);
+    return s;
+}
 zfs_status zfs_apply(zfs_disk *d, zfs_error *e) {
     if (!d)
         return zfs_error_set(e, ZFS_INVALID, "No disk is open");
@@ -409,8 +443,11 @@ zfs_status zfs_apply(zfs_disk *d, zfs_error *e) {
         return ZFS_OK;
     zfs_status s = ZFS_OK;
     if (d->info.image) {
-        if (!d->info.new_image && !same_image(d))
-            return zfs_error_set(e, ZFS_BUSY, "Image changed externally; reopen it before applying");
+        if (!d->info.new_image) {
+            s = zfs_core_guard(d, true, e);
+            if (s)
+                return s;
+        }
         char temporary[ZFS_PATH_MAX];
         FILE *dest = zfs_temp_sibling(d->info.path, temporary, sizeof(temporary));
         if (!dest)
@@ -426,8 +463,12 @@ zfs_status zfs_apply(zfs_disk *d, zfs_error *e) {
         }
         if (!s && zfs_host_sync(dest))
             s = sys_error(e, "Cannot flush replacement image");
-        if (fclose(dest) && !s)
-            s = sys_error(e, "Cannot close replacement image");
+        if (!s && d->verified_apply)
+            s = verify_staged(d, dest, ZFS_NATIVE_INVALID, e);
+        if (!s && d->guarded) {
+            zfs_native fd = image_handle(dest);
+            s = zfs_native_guard(&fd, temporary, true, true, e);
+        }
         if (!s && !d->info.new_image && !same_image(d))
             s = zfs_error_set(e, ZFS_BUSY, "Image changed while preparing Apply");
         if (!s) {
@@ -435,29 +476,46 @@ zfs_status zfs_apply(zfs_disk *d, zfs_error *e) {
                 fclose(d->base);
                 d->base = NULL;
             }
-            if (zfs_host_publish(temporary, d->info.path, !d->info.new_image))
+            if (zfs_host_publish(temporary, d->info.path, !d->info.new_image)) {
                 s = zfs_error_set(e, ZFS_IO,
                                   "Cannot publish image (destination exists or replacement failed)");
-            d->base = zfs_host_open(d->info.path, "rb");
-            if (!s && !d->base) {
-                d->info.failed = true;
-                s = zfs_error_set(e, ZFS_IO, "Image committed but could not reopen it");
+                if (!d->info.new_image) {
+                    d->base = zfs_host_open(d->info.path, "rb");
+                    d->guarded = false;
+                    if (!d->base || zfs_core_guard(d, true, NULL))
+                        d->info.failed = true;
+                }
+            } else {
+                d->base = dest;
+                dest = NULL;
             }
         }
+        if (dest)
+            fclose(dest);
         if (s) {
             zfs_host_remove(temporary);
             return s;
         }
         save_stamp(d);
     } else {
-        zfs_native fd = ZFS_NATIVE_INVALID;
-        uint64_t size;
-        s = zfs_native_open(d->info.path, true, &fd, &size, e);
+        bool held = d->guarded && d->guard_write;
+        zfs_native fd = held ? d->device : ZFS_NATIVE_INVALID;
+        uint64_t size = d->info.size;
+        if (!held)
+            s = zfs_native_open(d->info.path, true, &fd, &size, e);
         if (s)
             return s;
-        if (size != d->info.size) {
-            zfs_native_close(fd);
-            return zfs_error_set(e, ZFS_BUSY, "Device size changed");
+        if (size != d->info.size || !zfs_native_same(d->device, fd)) {
+            if (!held)
+                zfs_native_close(fd);
+            return zfs_error_set(e, ZFS_BUSY, "Device identity or size changed");
+        }
+        if (d->verified_apply && d->recovery_is_merge)
+            s = verify_original_device(d, e);
+        if (s) {
+            if (!held)
+                zfs_native_close(fd);
+            return s;
         }
         unsigned char sector[SECTOR];
         uint64_t completed = 0;
@@ -470,18 +528,24 @@ zfs_status zfs_apply(zfs_disk *d, zfs_error *e) {
             }
         if (!s)
             s = zfs_native_sync(fd, e);
-        zfs_native_close(fd);
+        if (!s && d->verified_apply)
+            s = verify_staged(d, NULL, fd, e);
+        if (!held)
+            zfs_native_close(fd);
         if (s) {
             d->info.failed = true;
-            return zfs_error_set(
-                e, ZFS_PARTIAL_WRITE,
-                "Apply failed; device may be partially updated. Reopen it before continuing");
+            return zfs_error_set(e, ZFS_PARTIAL_WRITE,
+                                 "Apply or readback failed; device may be partially updated. Reopen it "
+                                 "before restoring from the retained backup");
         }
     }
     d->info.pending = d->info.new_image = false;
     d->original = d->info;
     memset(d->dirty, 0, d->bitmap_size);
     d->dirty_count = 0;
+    d->verified_apply = false;
+    d->recovery_is_merge = false;
+    ++d->revision;
     if (d->callbacks.log)
         d->callbacks.log(d->callbacks.user, "Changes applied");
     return ZFS_OK;
@@ -970,8 +1034,7 @@ zfs_status zfs_file_read(zfs_disk *d, int part, const char *path, uint64_t offse
     free(f);
     return s;
 }
-zfs_status zfs_export(zfs_disk *d, int part, const char *path, const char *host, bool overwrite,
-                      zfs_error *e) {
+zfs_status zfs_core_export_destination(zfs_disk *d, const char *host, zfs_error *e) {
     if (!host || !*host || strlen(host) >= ZFS_PATH_MAX - 64)
         return zfs_error_set(e, ZFS_INVALID, "Invalid export destination");
     if (d && d->info.image) {
@@ -992,7 +1055,32 @@ zfs_status zfs_export(zfs_disk *d, int part, const char *path, const char *host,
                 return zfs_error_set(e, ZFS_INVALID, "Cannot export onto the active image or an alias");
         }
     }
+    return ZFS_OK;
+}
+zfs_status zfs_core_path_directory(zfs_disk *d, int part, const char *path, bool *directory, zfs_error *e) {
     zfs_status s = path_check(path, e);
+    if (s)
+        return s;
+    filesystem *f = NULL;
+    s = fs_open(d, part, &f, e);
+    if (s)
+        return s;
+    *directory = !strcmp(path, "/");
+    if (!*directory) {
+        zealfs_fd_t fd;
+        s = fs_error(zealfs_stat(path, &f->fs, &fd), e);
+        if (!s)
+            *directory = (fd.entry.flags & IS_DIR) != 0;
+    }
+    free(f);
+    return s;
+}
+zfs_status zfs_core_export_file(zfs_disk *d, int part, const char *path, const char *host, bool overwrite,
+                               zfs_error *e) {
+    zfs_status s = zfs_core_export_destination(d, host, e);
+    if (s)
+        return s;
+    s = path_check(path, e);
     if (s)
         return s;
     filesystem *f = NULL;
@@ -1046,3 +1134,207 @@ zfs_status zfs_export(zfs_disk *d, int part, const char *path, const char *host,
     free(f);
     return s;
 }
+
+static zfs_native image_handle(FILE *file) {
+#ifdef _WIN32
+    return (HANDLE)_get_osfhandle(_fileno(file));
+#else
+    return fileno(file);
+#endif
+}
+bool zfs_core_same_disk(zfs_disk *a, zfs_disk *b) {
+    if (!a || !b)
+        return false;
+    if (a == b)
+        return true;
+    if (a->info.image != b->info.image)
+        return false;
+    return a->info.image ? a->base && b->base && file_identity(a->base, b->base)
+                         : zfs_native_same(a->device, b->device);
+}
+bool zfs_core_unchanged(zfs_disk *d) { return d && !d->info.failed && (!d->info.image || same_image(d)); }
+zfs_status zfs_core_guard(zfs_disk *d, bool writing, zfs_error *e) {
+    if (!d || d->info.new_image || d->info.failed)
+        return zfs_error_set(e, ZFS_INVALID, "An existing healthy target is required");
+    if (d->guarded) {
+        if (!d->info.image && writing && !d->guard_write)
+            return zfs_error_set(e, ZFS_BUSY,
+                                 "Reopen this read-protected device before using it as a target");
+        return ZFS_OK;
+    }
+    if (d->info.image && !same_image(d))
+        return zfs_error_set(e, ZFS_BUSY, "Image changed externally; reopen it");
+    zfs_native fd = d->info.image ? image_handle(d->base) : d->device;
+    zfs_status s = zfs_native_guard(&fd, d->info.path, d->info.image, writing, e);
+    if (!d->info.image)
+        d->device = fd;
+    if (!s) {
+        d->guarded = true;
+        d->guard_write = writing;
+    }
+    return s;
+}
+zfs_status zfs_core_clone(zfs_disk *d, zfs_disk **view, zfs_error *e) {
+    zfs_status s = allocate_disk(d->info.path, d->info.size, d->info.image, view, e);
+    if (s)
+        return s;
+    zfs_disk *v = *view;
+    v->info = d->info;
+    v->original = d->original;
+    v->stamp = d->stamp;
+    v->base = d->base;
+    v->device = d->device;
+    v->borrowed_base = true;
+    v->callbacks = d->callbacks;
+    return ZFS_OK;
+}
+void zfs_core_attach(zfs_disk *target, zfs_disk *view) {
+    FILE *overlay = target->overlay;
+    target->overlay = view->overlay;
+    view->overlay = overlay;
+    unsigned char *bitmap = target->dirty;
+    target->dirty = view->dirty;
+    view->dirty = bitmap;
+    target->dirty_count = view->dirty_count;
+    view->dirty_count = 0;
+    target->info = view->info;
+    target->verified_apply = true;
+    ++target->revision;
+    memset(target->usage_cached, 0, sizeof(target->usage_cached));
+}
+zfs_status zfs_core_read(zfs_disk *d, uint64_t offset, void *buffer, size_t size, zfs_error *e) {
+    return bytes_io(d, offset, buffer, size, false, e);
+}
+zfs_status zfs_core_stage_raw(zfs_disk *d, uint64_t offset, zfs_disk *source, uint64_t size, zfs_error *e) {
+    zfs_status s = begin(d, e);
+    if (s)
+        return s;
+    unsigned char incoming[65536], current[65536];
+    for (uint64_t at = 0; at < size && !s; at += sizeof(incoming)) {
+        size_t n = size - at < sizeof(incoming) ? (size_t)(size - at) : sizeof(incoming);
+        s = bytes_io(source, at, incoming, n, false, e);
+        if (!s)
+            s = bytes_io(d, offset + at, current, n, false, e);
+        if (!s && memcmp(incoming, current, n))
+            s = bytes_io(d, offset + at, incoming, n, true, e);
+        progress(d, at + n, size);
+    }
+    s = finish(d, s, e);
+    if (!s) {
+        bool pending = d->info.pending;
+        s = parse(d, e);
+        d->info.pending = pending;
+    }
+    return s;
+}
+zfs_status zfs_core_copy_metadata(zfs_disk *source, int sp, zfs_disk *target, int tp, const char *path,
+                                  zfs_error *e) {
+    filesystem *from = NULL, *to = NULL;
+    zfs_status s = fs_open(source, sp, &from, e);
+    if (s)
+        return s;
+    s = fs_open(target, tp, &to, e);
+    if (s) {
+        free(from);
+        return s;
+    }
+    zealfs_fd_t a, b;
+    s = fs_error(zealfs_stat(path, &from->fs, &a), e);
+    if (!s)
+        s = fs_error(zealfs_stat(path, &to->fs, &b), e);
+    if (!s) {
+        s = begin(target, e);
+        if (!s) {
+            memcpy(b.entry.year, a.entry.year,
+                   offsetof(zealfs_entry_t, reserved) - offsetof(zealfs_entry_t, year));
+            s = finish(target, fs_error((int)fs_write(to, &b.entry, b.entry_addr, sizeof(b.entry)), e), e);
+        }
+    }
+    free(from);
+    free(to);
+    return s;
+}
+zfs_status zfs_core_copy_file(zfs_disk *source, int sp, zfs_disk *target, int tp, const char *path,
+                              zfs_error *e) {
+    filesystem *from = NULL;
+    zfs_status s = fs_open(source, sp, &from, e);
+    if (s)
+        return s;
+    zealfs_fd_t fd;
+    s = fs_error(zealfs_open(path, &from->fs, &fd), e);
+    FILE *spool = !s ? tmpfile() : NULL;
+    if (!s && !spool)
+        s = sys_error(e, "Cannot create transfer spool");
+    unsigned char buffer[65536];
+    for (uint64_t at = 0; !s && at < fd.entry.size;) {
+        size_t n = fd.entry.size - at < sizeof(buffer) ? (size_t)(fd.entry.size - at) : sizeof(buffer);
+        int r = zealfs_read(&from->fs, &fd, buffer, n, (int64_t)at);
+        if (r != (int)n)
+            s = r < 0 ? fs_error(r, e) : zfs_error_set(e, ZFS_IO, "Short source read");
+        else if (fwrite(buffer, 1, n, spool) != n)
+            s = sys_error(e, "Transfer spool write failed");
+        at += n;
+    }
+    if (!s && zfs_seek(spool, 0))
+        s = sys_error(e, "Transfer spool seek failed");
+    if (!s)
+        s = create_file(target, tp, path, spool, NULL, fd.entry.size, e);
+    if (spool)
+        fclose(spool);
+    free(from);
+    if (!s)
+        s = zfs_core_copy_metadata(source, sp, target, tp, path, e);
+    return s;
+}
+zfs_status zfs_core_files_equal(zfs_disk *a, int ap, zfs_disk *b, int bp, const char *path, bool *equal,
+                                zfs_error *e) {
+    filesystem *x = NULL, *y = NULL;
+    *equal = false;
+    zfs_status s = fs_open(a, ap, &x, e);
+    if (s)
+        return s;
+    if (b) {
+        s = fs_open(b, bp, &y, e);
+        if (s) {
+            free(x);
+            return s;
+        }
+    }
+    zealfs_fd_t xf, yf;
+    s = fs_error(zealfs_open(path, &x->fs, &xf), e);
+    if (!s && b)
+        s = fs_error(zealfs_open(path, &y->fs, &yf), e);
+    if (!s && b && xf.entry.size != yf.entry.size) {
+        free(x);
+        free(y);
+        return ZFS_OK;
+    }
+    unsigned char xb[65536], yb[65536];
+    bool same = true;
+    for (uint64_t at = 0; !s && at < xf.entry.size;) {
+        size_t n = xf.entry.size - at < sizeof(xb) ? (size_t)(xf.entry.size - at) : sizeof(xb);
+        int r = zealfs_read(&x->fs, &xf, xb, n, (int64_t)at);
+        if (r != (int)n)
+            s = r < 0 ? fs_error(r, e) : zfs_error_set(e, ZFS_IO, "Short file read");
+        if (!s && b) {
+            r = zealfs_read(&y->fs, &yf, yb, n, (int64_t)at);
+            if (r != (int)n)
+                s = r < 0 ? fs_error(r, e) : zfs_error_set(e, ZFS_IO, "Short file read");
+            else if (memcmp(xb, yb, n))
+                same = false;
+        }
+        at += n;
+    }
+    *equal = !s && same;
+    free(x);
+    free(y);
+    return s;
+}
+zfs_status zfs_core_check_file(zfs_disk *d, int part, const char *path, zfs_error *e) {
+    bool equal;
+    return zfs_core_files_equal(d, part, NULL, 0, path, &equal, e);
+}
+const char *zfs_recovery_backup(const zfs_disk *d) {
+    return d && d->recovery_backup[0] ? d->recovery_backup : NULL;
+}
+int zfs_recovery_partition(const zfs_disk *d) { return d ? d->recovery_partition : -1; }

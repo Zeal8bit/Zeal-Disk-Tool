@@ -4,9 +4,21 @@
 /* Private frontend types. Disk and filesystem behavior belongs to zealfs_core. */
 #include "zealfs.h"
 #define CLI_MAX_ARGS 64
+#define CLI_LINE_CAPACITY 8192
+#define CLI_HISTORY_LIMIT 32
 
 typedef struct {
-    const char *target;
+    char entries[CLI_HISTORY_LIMIT][CLI_LINE_CAPACITY];
+    size_t count, next;
+} cli_history;
+typedef enum { CLI_INPUT_ERROR = -1, CLI_INPUT_EOF, CLI_INPUT_OK, CLI_INPUT_LONG } cli_input;
+cli_input cli_readline(cli_history *history, char line[CLI_LINE_CAPACITY], bool terminal);
+void cli_history_add(cli_history *history, const char *line);
+
+typedef struct {
+    const char *target, *source, *backup;
+    bool source_image, partition_set;
+    int source_partition;
     bool image, json, yes, dry_run, mbr, size_set;
     uint64_t size;
     uint32_t alignment;
@@ -22,6 +34,7 @@ typedef struct {
 
 /* Argument parsing and filesystem-path normalization. */
 bool cli_parse(int argc, char **argv, cli_options *options, char *error, size_t capacity);
+bool cli_parse_shell(int argc, char **argv, cli_options *options, char *error, size_t capacity);
 bool cli_command_matches(const cli_options *options, const char *command, const char *subcommand, int count);
 bool cli_filesystem_path(const char *input, char output[512]);
 
@@ -35,6 +48,10 @@ void cli_success(const cli_options *options, const char *message);
 void cli_print_devices(const cli_options *options, const zfs_info *devices, size_t count);
 void cli_print_disk(const cli_options *options, zfs_disk *disk);
 void cli_print_entries(const cli_options *options, const zfs_entry *entries, size_t count);
+void cli_recovery_notice(zfs_disk *disk);
+int cli_transfer_report(const cli_options *options, const zfs_merge_report *report, const char *state,
+                        int exit_code, const zfs_error *error);
+int cli_transfer(cli_session *session, const cli_options *options, bool restore);
 void cli_print_summary(const cli_options *options, const zfs_info *info, bool creating);
 
 /* Shared session lifecycle and command execution. Main owns final disk cleanup. */

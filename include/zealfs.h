@@ -24,7 +24,8 @@ typedef enum {
     ZFS_NO_MEMORY,
     ZFS_BUSY,
     ZFS_CORRUPT,
-    ZFS_PARTIAL_WRITE
+    ZFS_PARTIAL_WRITE,
+    ZFS_CONFLICT
 } zfs_status;
 typedef struct {
     zfs_status code;
@@ -85,14 +86,57 @@ zfs_status zfs_mkdir(zfs_disk *disk, int partition, const char *path, zfs_error 
 zfs_status zfs_remove(zfs_disk *disk, int partition, const char *path, bool directory, zfs_error *error);
 zfs_status zfs_import(zfs_disk *disk, int partition, const char *host_path, const char *path,
                       zfs_error *error);
+/* Files export to host_path; directories recursively export their contents into
+ * host_path. Existing unrelated host entries are preserved. Each file publishes
+ * atomically; an I/O failure may leave already-exported files/directories. */
 zfs_status zfs_export(zfs_disk *disk, int partition, const char *path, const char *host_path, bool overwrite,
                       zfs_error *error);
+/* Validate source contents and destination conflicts without host writes. */
+zfs_status zfs_export_validate(zfs_disk *disk, int partition, const char *path, const char *host_path,
+                               bool overwrite, zfs_error *error);
 zfs_status zfs_file_read(zfs_disk *disk, int partition, const char *path, uint64_t offset, void *buffer,
                          size_t size, size_t *read_count, zfs_error *error);
 /* Creates a new file from bytes; existing files are never overwritten. */
 zfs_status zfs_file_write(zfs_disk *disk, int partition, const char *path, const void *buffer, size_t size,
                           zfs_error *error);
 const char *zfs_status_string(zfs_status status);
+
+/* Merge preparation reads both committed filesystems and builds an isolated,
+ * bounded-memory staged view. Handles must be clean. Protection acquired here
+ * lasts until the handle is closed (including across shell apply/discard).
+ * A prepared plan borrows its target; close/free the plan before that target.
+ * Reports must initially be zeroed and released with zfs_merge_report_free,
+ * including on errors, when they may contain type-conflict paths. */
+typedef struct zfs_merge_plan zfs_merge_plan;
+typedef struct {
+    char source[ZFS_PATH_MAX], target[ZFS_PATH_MAX], backup[ZFS_PATH_MAX];
+    int source_partition, target_partition;
+    uint64_t files_added, files_replaced, files_unchanged, files_preserved;
+    uint64_t directories_created, directories_merged, directories_preserved;
+    uint64_t bytes_copied, backup_bytes;
+    char **conflicts;
+    size_t conflict_count;
+    bool restore, noop, backup_created, staged, applied;
+} zfs_merge_report;
+zfs_status zfs_merge_prepare(zfs_disk *source, int source_partition, zfs_disk *target, int target_partition,
+                             zfs_merge_plan **plan, zfs_merge_report *report, zfs_error *error);
+/* Verify and publish the original partition backup before exposing the prepared
+ * merge as target changes. A NULL backup_path explicitly skips backup.
+ * No-op plans create no backup. Apply remains explicit. */
+zfs_status zfs_merge_stage(zfs_merge_plan *plan, const char *backup_path, zfs_error *error);
+/* Check destination and available host space without creating a backup. Stage
+ * repeats the checks and publishes without replacement to handle races. */
+zfs_status zfs_merge_check_backup(zfs_merge_plan *plan, const char *backup_path, zfs_error *error);
+zfs_status zfs_backup_partition(zfs_disk *disk, int partition, const char *path, zfs_error *error);
+zfs_status zfs_restore_prepare(const char *backup_path, zfs_disk *target, int partition,
+                               zfs_merge_plan **plan, zfs_merge_report *report, zfs_error *error);
+zfs_status zfs_restore_stage(zfs_merge_plan *plan, zfs_error *error);
+void zfs_merge_plan_free(zfs_merge_plan *plan);
+void zfs_merge_report_free(zfs_merge_report *report);
+/* Merge/restore automatically request verified Apply, including subsequent
+ * shell apply calls. These identify the retained backup after a write failure. */
+const char *zfs_recovery_backup(const zfs_disk *disk);
+int zfs_recovery_partition(const zfs_disk *disk);
 #ifdef __cplusplus
 }
 #endif

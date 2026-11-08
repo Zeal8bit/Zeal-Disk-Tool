@@ -6,7 +6,7 @@ Zeal Disk Tool manages ZealFS v2 disk images and physical disks for the Zeal 8-b
 
 Both frontends support disk discovery, images with an MBR or a raw ZealFS filesystem, partition creation/formatting/deletion, directory browsing/creation/deletion, file import/export, and filesystem usage reporting. The GUI layout and renderer are unchanged.
 
-**All target changes are staged until Apply**, including creating images, creating MBRs, importing files, and deleting files or directories. Pending changes are visible when browsing or exporting. Discard leaves the original image/device unchanged. A new image does not appear at its destination until Apply. Export writes a host file immediately.
+**All target changes are staged until Apply**, including creating images, creating MBRs, importing files, and deleting files or directories. Pending changes are visible when browsing or exporting. Discard leaves the original image/device unchanged. A new image does not appear at its destination until Apply. Export writes host files/directories immediately.
 
 Image Apply builds and flushes a replacement file alongside the original, then atomically publishes it. Allow enough free space for the resulting image. Physical devices require in-place writes; an interrupted or failed Apply can leave a device partially updated. Such sessions must be reopened before further changes. Back up valuable data before using either frontend.
 
@@ -97,6 +97,35 @@ Run `zdt --help` for the complete command list. Options can appear before or aft
 
 One-shot mutations stage and validate first, then show a summary and ask before Apply. `--yes` skips that prompt; `--dry-run` discards the proposed change. Without an interactive terminal, either flag is required. Export asks before replacing an existing host file unless `--yes` is given. Image creation and filesystem imports never overwrite existing destinations.
 
+### Updating from another image or device
+
+Merge recursively adds source entries and replaces matching files, preserving every target-only file and directory. Identical files are skipped. Any file/directory type conflict aborts the entire merge before backup or target writes. Source and target may have different capacities; the complete merged filesystem must fit.
+
+```sh
+# Preview with no backup or target writes
+zdt -d /dev/rdisk4 merge -f tf.img --dry-run --json
+
+# Back up the selected partition, then apply the update
+zdt -d /dev/rdisk4 merge -f tf.img -b before.img --yes --json
+
+# Restore that partition exactly
+zdt -d /dev/rdisk4 restore -f before.img --yes
+```
+
+`-f` means `--from-image`; use `--from-device PATH` for a physical source. Merge/restore automatically select the sole ZealFS partition on each side. When ambiguous, specify `--partition N` for the target and `--from-partition N` for a merge source.
+
+`-b` (`--backup`) creates a new raw image of the entire selected target partition, including unused capacity. It never overwrites an existing file. The MBR and other partitions are neither backed up nor changed. Allow host space for this backup, temporary staging, and an entire replacement disk image when updating an image file. Backup creation is flushed and byte-verified before staging the merge. A merge with no changes creates no backup.
+
+Backup is optional: omitting `-b` asks whether to proceed without a backup. `--yes` explicitly accepts proceeding, including without a backup; noninteractive commands without `--yes` cancel with exit code 3. Dry runs and unchanged merges need no confirmation.
+
+In shell `merge`, `-i` aliases `--from-image` and `-d` aliases `--from-device`, since the target is already open. For example, `merge -i tf.img -b before.img` or `merge -d /dev/rdisk5 -b before.img`. The existing `-f` source-image alias remains accepted. Top-level `-i`/`-d` and shell `open -i`/`open -d` still select the target.
+
+In the shell, merge requires a clean target. It creates the requested backup immediately and stages the update; `apply` writes it, while `discard` leaves the backup intact. Without `-b`, shell merge asks for confirmation before staging. Restore also stages until `apply`. Restore requires a raw backup of exactly the selected partition's capacity and can recover damaged filesystem metadata after closing and reopening a failed session.
+
+Mounted physical sources and targets are refused; unmount the whole disk yourself. Device protection remains held until the session closes, including after discard. Physical writes are flushed and read back. A failure may leave a partially written device: keep the backup, reopen the device and restore it explicitly. There is no automatic rollback. Without a backup, there is no saved recovery image.
+
+Transfer JSON includes source/target identities and partition numbers, file/directory counts, copied bytes, conflicts, and `noop`, `backup_created`, `staged`, and `applied` flags. The backup path is present when supplied. ZDE host scripts can invoke these same native commands with local image paths, `--yes`, `--json`, and exit status handling; physical-device updates must run on the host. Downloads and ZDE integration are outside this change.
+
 ### Interactive shell
 
 ```text
@@ -109,9 +138,20 @@ zdt> apply
 zdt> quit
 ```
 
-Inside the shell, `help` shows the shell command reference. Shell mutations stay pending until `apply` or `discard`. `open --image PATH` and `open --device PATH` switch targets, asking how to handle pending changes. `quit` offers the same choice. End-of-input discards pending work and returns exit code 3. Input supports single/double quoted arguments, without expansion or external command execution. `--partition N` applies to the individual command. JSON, `--yes`, and dry runs are one-shot features, not shell modes.
+Inside the shell, `help` shows the shell command reference. Up/Down browse the last 32 nonempty commands; history stays in memory and is cleared when the shell exits. Down past the newest entry restores the command you were typing. Recalled commands can be edited before Enter. Shell mutations stay pending until `apply` or `discard`. `open --image PATH` and `open --device PATH` switch targets, asking how to handle pending changes. `quit` offers the same choice. End-of-input discards pending work and returns exit code 3. Input supports single/double quoted arguments, without expansion or external command execution. `--partition N` applies to the individual command. JSON, `--yes`, and dry runs are one-shot features, not shell modes.
 
-Filesystem paths are always interpreted from the selected filesystem root. The leading `/` is optional, and trailing slashes are accepted: `games`, `games/`, `/games`, and `/games/` all refer to the same directory. There is no current-directory state or drive-letter prefix. Host import/export paths keep their normal host filesystem meaning. Each name is at most 16 bytes. Recursive copy/delete and renaming existing filesystem entries are not included; the GUI's import-time name prompt remains available for long host filenames.
+Filesystem paths are always interpreted from the selected filesystem root. The leading `/` is optional, and trailing slashes are accepted: `games`, `games/`, `/games`, and `/games/` all refer to the same directory. There is no current-directory state or drive-letter prefix. Host import/export paths keep their normal host filesystem meaning. Each name is at most 16 bytes. Recursive host export is supported; recursive filesystem copy/delete and renaming existing filesystem entries are not included; the GUI's import-time name prompt remains available for long host filenames.
+
+### Exporting directories
+
+`export FS_PATH HOST_PATH` copies a file to the specified host filename, or recursively copies a directory's contents into the specified host directory. Exporting `/` copies the entire selected filesystem. Missing destination directories are created, including empty directories from the source. Export sees staged contents and does not require Apply.
+
+```text
+zdt> export / /Users/higginsd/Downloads/tf/exports
+zdt> export games ./games-export
+```
+
+Existing unrelated host files remain. Before any writes, export validates the source tree and checks destination conflicts. Existing files require overwrite confirmation (or `--yes` in one-shot mode); file/directory mismatches, links within the destination tree, unsafe host names and attempts to overwrite the active image are refused. A dry run validates without creating host files or directories. Files publish individually: an I/O failure can leave completed files and directories, so a directory export is not an atomic snapshot.
 
 ### JSON and exit status
 

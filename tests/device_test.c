@@ -46,6 +46,15 @@ zfs_status zfs_native_sync(zfs_native fd, zfs_error *e) {
     return fail_flush ? zfs_error_set(e, ZFS_IO, "Simulated flush failure") : ZFS_OK;
 }
 void zfs_native_close(zfs_native fd) { (void)fd; }
+zfs_status zfs_native_guard(zfs_native *fd, const char *path, bool image, bool writing, zfs_error *e) {
+    (void)fd;
+    (void)path;
+    (void)image;
+    (void)writing;
+    (void)e;
+    return ZFS_OK;
+}
+bool zfs_native_same(zfs_native a, zfs_native b) { return a == b; }
 static zfs_disk *staged(void) {
     memset(media, 0, sizeof(media));
     writes = 0;

@@ -23,7 +23,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 else()
     message(FATAL_ERROR "Supported platforms: macOS, Linux, Windows")
 endif()
-add_library(zealfs_core STATIC src/zealfs/core.c src/zealfs/host.c src/zealfs/zealfs_v2.c ${NATIVE_SOURCES})
+add_library(zealfs_core STATIC src/zealfs/export.c src/zealfs/transfer.c src/zealfs/core.c src/zealfs/host.c src/zealfs/zealfs_v2.c ${NATIVE_SOURCES})
 target_include_directories(zealfs_core PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>" "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>" PRIVATE src)
 if(NOT WIN32)
     target_compile_definitions(zealfs_core PUBLIC _FILE_OFFSET_BITS=64)
@@ -81,10 +81,12 @@ if(ZEALFS_BUILD_CLI)
     add_executable(zdt
         src/cli/main.c
         src/cli/args.c
+        src/cli/transfer.c
         src/cli/commands.c
         src/cli/help.c
         src/cli/output.c
         src/cli/session.c
+        src/cli/terminal.c
         src/cli/shell.c)
     target_include_directories(zdt PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
     target_link_libraries(zdt PRIVATE zealfs_core)
@@ -105,9 +107,18 @@ if(ZEALFS_BUILD_TESTS)
     target_include_directories(zealfs_device_test PRIVATE src/zealfs)
     target_link_libraries(zealfs_device_test PRIVATE zealfs_core)
     add_test(NAME device_failure COMMAND zealfs_device_test)
+    add_executable(zealfs_merge_device_test tests/merge_device_test.c)
+    target_include_directories(zealfs_merge_device_test PRIVATE src/zealfs)
+    target_link_libraries(zealfs_merge_device_test PRIVATE zealfs_core)
+    add_test(NAME merge_device COMMAND zealfs_merge_device_test)
     if(ZEALFS_BUILD_CLI)
         find_package(Python3 COMPONENTS Interpreter)
         if(Python3_Interpreter_FOUND)
+            add_test(NAME export_cli COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/export_cli_test.py $<TARGET_FILE:zdt>)
+            add_test(NAME merge_cli COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/merge_cli_test.py $<TARGET_FILE:zdt>)
+            if(UNIX)
+                add_test(NAME shell_history COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/shell_history_test.py $<TARGET_FILE:zdt>)
+            endif()
             add_test(NAME cli COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_test.py $<TARGET_FILE:zdt>)
         endif()
     endif()

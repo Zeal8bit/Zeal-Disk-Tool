@@ -7,6 +7,10 @@
 int cli_execute(cli_session *s, const cli_options *input) {
     cli_options normalized = *input;
     const cli_options *o = &normalized;
+    bool merging = cli_command_matches(o, "merge", NULL, 1);
+    bool restoring = cli_command_matches(o, "restore", NULL, 1);
+    if (!merging && !restoring && (o->source || o->backup || o->source_partition >= 0))
+        return cli_failure(o, 2, "usage", "Source and backup options are only valid for merge/restore");
     int path_argument = -1;
     if (cli_command_matches(o, "ls", NULL, 2) || cli_command_matches(o, "mkdir", NULL, 2) ||
         cli_command_matches(o, "rm", NULL, 2) || cli_command_matches(o, "rmdir", NULL, 2) ||
@@ -78,6 +82,8 @@ int cli_execute(cli_session *s, const cli_options *input) {
         return cli_api_failure(o, &e);
     if (!s->disk)
         return cli_failure(o, 2, "usage", "Select a target with --image PATH or --device PATH");
+    if (merging || restoring)
+        return cli_transfer(s, o, restoring);
     if (cli_command_matches(o, "apply", NULL, 1) || cli_command_matches(o, "discard", NULL, 1)) {
         if (!s->shell)
             return cli_failure(o, 2, "usage", "Apply/discard are shell commands");
@@ -91,8 +97,11 @@ int cli_execute(cli_session *s, const cli_options *input) {
             s->disk = NULL;
         } else
             status = zfs_discard(s->disk, &e);
-        if (status)
+        if (status) {
+            if (applying)
+                cli_recovery_notice(s->disk);
             return cli_api_failure(o, &e);
+        }
         cli_success(o, applying ? "Changes applied" : "Changes discarded");
         return 0;
     }
@@ -113,9 +122,7 @@ int cli_execute(cli_session *s, const cli_options *input) {
     }
     if (cli_command_matches(o, "export", NULL, 3)) {
         if (o->dry_run) {
-            size_t n;
-            unsigned char b;
-            status = zfs_file_read(s->disk, o->partition, o->argv[1], 0, &b, 1, &n, &e);
+            status = zfs_export_validate(s->disk, o->partition, o->argv[1], o->argv[2], true, &e);
             if (status)
                 return cli_api_failure(o, &e);
             cli_success(o, "Export validated; destination unchanged");
@@ -129,7 +136,7 @@ int cli_execute(cli_session *s, const cli_options *input) {
         }
         if (status)
             return cli_api_failure(o, &e);
-        cli_success(o, "File exported");
+        cli_success(o, "Export completed");
         return 0;
     }
     if (!creating) {

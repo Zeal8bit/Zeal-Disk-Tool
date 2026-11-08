@@ -34,8 +34,10 @@ int cli_leave_disk(cli_session *s, const cli_options *o) {
             return cli_failure(o, 3, "confirmation", "Apply or discard pending changes before leaving");
         if (answer == 1) {
             zfs_error e;
-            if (zfs_apply(s->disk, &e))
+            if (zfs_apply(s->disk, &e)) {
+                cli_recovery_notice(s->disk);
                 return cli_api_failure(o, &e);
+            }
         }
     }
     zfs_close(s->disk);

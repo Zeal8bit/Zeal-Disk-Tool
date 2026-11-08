@@ -355,3 +355,6 @@ int zealfs_write(zealfs_context_t* ctx, zealfs_fd_t* fd,
  *           changes need to be applied to the disk.
  */
 int zealfs_flush(zealfs_context_t* ctx, zealfs_fd_t* fd);
+
+/* Private engine helper: unlike opendir, returns the entry's metadata address. */
+int zealfs_stat(const char *path, zealfs_context_t *ctx, zealfs_fd_t *fd);

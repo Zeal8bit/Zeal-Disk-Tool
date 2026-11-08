@@ -237,8 +237,12 @@ static int browse_path(zealfs_context_t* ctx, const char * path,
 {
     zealfs_entry_t entries[2048];
     /* Store the current directory that is followed by '/' */
-    char tmp_name[NAME_MAX_LEN + 1] = { 0 };
+    char tmp_name[NAME_MAX_LEN + 1];
     zealfs_header_t* header = (zealfs_header_t*) ctx->header;
+    /* Reuse the directory buffer for each component. Recursive descent would
+     * otherwise consume 64 KiB of stack per level on deeply nested exports. */
+next_component:
+    memset(tmp_name, 0, sizeof(tmp_name));
     int max_entries = root ? get_root_dir_max_entries(header) :
                              get_dir_max_entries(header);
     const int page_size = get_page_size(header);
@@ -295,7 +299,10 @@ static int browse_path(zealfs_context_t* ctx, const char * path,
                 } else {
                     /* Only directories can be traversed. */
                     if (!(entries[i].flags & IS_DIR)) return -ENOTDIR;
-                    return browse_path(ctx, slash + 1, ADDR_FROM_PAGE(header, entries[i].start_page), 0, out);
+                    path = slash + 1;
+                    entries_addr = ADDR_FROM_PAGE(header, entries[i].start_page);
+                    root = 0;
+                    goto next_component;
                 }
             }
         }
@@ -1002,4 +1009,13 @@ void zealfs_destroy(zealfs_context_t* ctx)
     /* Remove the header that was previously loaded */
     memset(ctx->header, 0, sizeof(ctx->header));
     ctx->header_size = ctx->fat_size = 0;
+}
+
+int zealfs_stat(const char *path, zealfs_context_t *ctx, zealfs_fd_t *fd) {
+    if (check_header(ctx) || !fd || !strcmp(path, "/")) return -EINVAL;
+    browse_out_t info;
+    int result = browse_path(ctx, path + 1, get_root_dir_addr((zealfs_header_t *)ctx->header), 1, &info);
+    if (result < 0) return result;
+    if (!result) return -ENOENT;
+    fd->entry = info.entry; fd->entry_addr = info.entry_addr; return 0;
 }
