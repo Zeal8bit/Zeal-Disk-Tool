@@ -12,7 +12,7 @@
 
 #define MAX_PATH_LENGTH 512
 #define MAX_ENTRIES     2048 // 64KB pages / 32
-#define ENTRY_NAME_LEN  ZFS_NAME_MAX
+#define ENTRY_NAME_LEN ZFS_NAME_MAX
 #define ENTRY_SIZE_LEN  14
 #define ENTRY_TYPE_LEN  12
 #define ENTRY_DATE_LEN  16
@@ -32,11 +32,11 @@ typedef struct {
     partition_t* partition;
     int  selected_file;
     /* Opened disk descriptor */
-    disk_info_t *disk;
+    disk_info_t* disk;
     unsigned revision;
     /* Entries for the current view */
-    zfs_entry *entries_raw;
-    partition_entry_t *entries;
+    zfs_entry* entries_raw;
+    partition_entry_t* entries;
     int entries_count;
 } partition_viewer_t;
 
@@ -79,31 +79,43 @@ static void remove_trailing_slash(char* path)
     }
 }
 
-
-static int read_directory(const char *path_ro)
+static int read_directory(const char* path_ro)
 {
-    if (!m_part_ctx.disk || !m_part_ctx.partition) return -1;
+    if (!m_part_ctx.disk || !m_part_ctx.partition) {
+        return -1;
+    }
     char path[MAX_PATH_LENGTH + 1];
     snprintf(path, sizeof(path), "%s", path_ro);
     remove_trailing_slash(path);
     zfs_error error;
-    zfs_entry *raw = NULL; size_t count = 0;
-    int index = (int)(m_part_ctx.partition - m_part_ctx.disk->partitions);
+    zfs_entry* raw = NULL;
+    size_t count = 0;
+    int index = (int) (m_part_ctx.partition - m_part_ctx.disk->partitions);
     if (zfs_list(m_part_ctx.disk->handle, index, path, &raw, &count, &error)) {
-        ui_statusbar_print(error.message); return -1;
+        ui_statusbar_print(error.message);
+        return -1;
     }
-    partition_entry_t *entries = calloc(count ? count : 1, sizeof(*entries));
-    if (!entries) { zfs_entries_free(raw); ui_statusbar_print("Not enough memory to display directory"); return -1; }
-    free(m_part_ctx.entries); zfs_entries_free(m_part_ctx.entries_raw);
-    m_part_ctx.entries = entries; m_part_ctx.entries_raw = raw;
-    m_part_ctx.entries_count = (int)count;
-    if (m_part_ctx.selected_file >= (int)count) m_part_ctx.selected_file = 0;
+    partition_entry_t* entries = calloc(count ? count : 1, sizeof(*entries));
+    if (!entries) {
+        zfs_entries_free(raw);
+        ui_statusbar_print("Not enough memory to display directory");
+        return -1;
+    }
+    free(m_part_ctx.entries);
+    zfs_entries_free(m_part_ctx.entries_raw);
+    m_part_ctx.entries = entries;
+    m_part_ctx.entries_raw = raw;
+    m_part_ctx.entries_count = (int) count;
+    if (m_part_ctx.selected_file >= (int) count) {
+        m_part_ctx.selected_file = 0;
+    }
     for (size_t i = 0; i < count; ++i) {
         snprintf(entries[i].name, sizeof(entries[i].name), "%s%s", raw[i].name, raw[i].directory ? "/" : "");
         snprintf(entries[i].size, sizeof(entries[i].size), "%u", raw[i].size);
         snprintf(entries[i].type, sizeof(entries[i].type), "%s", raw[i].directory ? "Directory" : "File");
         char date[64];
-        snprintf(date, sizeof(date), "%04u-%02u-%02u %02u:%02u:%02u", raw[i].year, raw[i].month, raw[i].day, raw[i].hour, raw[i].minute, raw[i].second);
+        snprintf(date, sizeof(date), "%04u-%02u-%02u %02u:%02u:%02u", raw[i].year, raw[i].month, raw[i].day,
+                 raw[i].hour, raw[i].minute, raw[i].second);
         memcpy(entries[i].date, date, ENTRY_DATE_LEN);
     }
     return 0;
@@ -134,22 +146,32 @@ static void go_up_directory(void)
 
 static void partition_viewer_clear(void)
 {
-    zfs_entries_free(m_part_ctx.entries_raw); free(m_part_ctx.entries);
+    zfs_entries_free(m_part_ctx.entries_raw);
+    free(m_part_ctx.entries);
     memset(&m_part_ctx, 0, sizeof(m_part_ctx));
     strcpy(m_part_ctx.address_bar, "/");
 }
 
-static void partition_viewer_parse(disk_info_t *disk, partition_t *part)
+static void partition_viewer_parse(disk_info_t* disk, partition_t* part)
 {
     partition_viewer_clear();
-    m_part_ctx.disk = disk; m_part_ctx.partition = part;
+    m_part_ctx.disk = disk;
+    m_part_ctx.partition = part;
     m_part_ctx.revision = disk ? disk->revision : 0;
-    if (part) refresh_directory();
+    if (part) {
+        refresh_directory();
+    }
 }
-static int current_partition(void) { return (int)(m_part_ctx.partition - m_part_ctx.disk->partitions); }
-static void mutation_result(zfs_status status, const zfs_error *error, const char *message)
+
+static int current_partition(void)
 {
-    disk_sync(m_part_ctx.disk); m_part_ctx.revision = m_part_ctx.disk->revision;
+    return (int) (m_part_ctx.partition - m_part_ctx.disk->partitions);
+}
+
+static void mutation_result(zfs_status status, const zfs_error* error, const char* message)
+{
+    disk_sync(m_part_ctx.disk);
+    m_part_ctx.revision = m_part_ctx.disk->revision;
     ui_statusbar_print(status ? error->message : message);
     refresh_directory();
 }
@@ -167,10 +189,15 @@ static void change_directory(const char* directory)
 
 static void create_directory(void)
 {
-    const char *name = tinyfd_inputBox("New Folder", "Enter folder name (max 16 bytes):", "");
-    if (!name) return;
+    const char* name = tinyfd_inputBox("New Folder", "Enter folder name (max 16 bytes):", "");
+    if (!name) {
+        return;
+    }
     char path[MAX_PATH_LENGTH];
-    if (snprintf(path, sizeof(path), "%s%s", m_part_ctx.address_bar, name) >= (int)sizeof(path)) { ui_statusbar_print("Path is too long"); return; }
+    if (snprintf(path, sizeof(path), "%s%s", m_part_ctx.address_bar, name) >= (int) sizeof(path)) {
+        ui_statusbar_print("Path is too long");
+        return;
+    }
     zfs_error error;
     zfs_status status = zfs_mkdir(m_part_ctx.disk->handle, current_partition(), path, &error);
     mutation_result(status, &error, "Folder creation staged");
@@ -178,45 +205,75 @@ static void create_directory(void)
 
 static void delete_entry(void)
 {
-    if (m_part_ctx.entries_count <= 0) return;
-    zfs_entry *entry = &m_part_ctx.entries_raw[m_part_ctx.selected_file];
+    if (m_part_ctx.entries_count <= 0) {
+        return;
+    }
+    zfs_entry* entry = &m_part_ctx.entries_raw[m_part_ctx.selected_file];
     char path[MAX_PATH_LENGTH];
-    if (snprintf(path, sizeof(path), "%s%s", m_part_ctx.address_bar, entry->name) >= (int)sizeof(path)) { ui_statusbar_print("Path is too long"); return; }
+    if (snprintf(path, sizeof(path), "%s%s", m_part_ctx.address_bar, entry->name) >= (int) sizeof(path)) {
+        ui_statusbar_print("Path is too long");
+        return;
+    }
     zfs_error error;
     zfs_status status = zfs_remove(m_part_ctx.disk->handle, current_partition(), path, entry->directory, &error);
     mutation_result(status, &error, "Deletion staged");
 }
-static void gui_progress(void *user, uint64_t done, uint64_t total)
+
+static void gui_progress(void* user, uint64_t done, uint64_t total)
 {
-    (void)user; disk_update_progress_bar(total ? (int)(done * 100 / total) : 100);
+    (void) user;
+    disk_update_progress_bar(total ? (int) (done * 100 / total) : 100);
 }
 static void extract_selected_file(void)
 {
-    if (m_part_ctx.entries_count <= 0) return;
-    zfs_entry *entry = &m_part_ctx.entries_raw[m_part_ctx.selected_file];
-    if (entry->directory) { ui_statusbar_print("Only files can be extracted"); return; }
-    const char *destination = tinyfd_saveFileDialog("Export file", entry->name, 0, NULL, NULL);
-    if (!destination) return;
+    if (m_part_ctx.entries_count <= 0) {
+        return;
+    }
+    zfs_entry* entry = &m_part_ctx.entries_raw[m_part_ctx.selected_file];
+    if (entry->directory) {
+        ui_statusbar_print("Only files can be extracted");
+        return;
+    }
+    const char* destination = tinyfd_saveFileDialog("Export file", entry->name, 0, NULL, NULL);
+    if (!destination) {
+        return;
+    }
     char path[MAX_PATH_LENGTH];
-    if (snprintf(path, sizeof(path), "%s%s", m_part_ctx.address_bar, entry->name) >= (int)sizeof(path)) { ui_statusbar_print("Path is too long"); return; }
+    if (snprintf(path, sizeof(path), "%s%s", m_part_ctx.address_bar, entry->name) >= (int) sizeof(path)) {
+        ui_statusbar_print("Path is too long");
+        return;
+    }
     zfs_error error;
-    disk_init_progress_bar(); zfs_set_callbacks(m_part_ctx.disk->handle, (zfs_callbacks){.progress=gui_progress});
+    disk_init_progress_bar();
+    zfs_set_callbacks(m_part_ctx.disk->handle, (zfs_callbacks){.progress = gui_progress});
     zfs_status status = zfs_export(m_part_ctx.disk->handle, current_partition(), path, destination, true, &error);
-    zfs_set_callbacks(m_part_ctx.disk->handle, (zfs_callbacks){0}); disk_destroy_progress_bar();
+    zfs_set_callbacks(m_part_ctx.disk->handle, (zfs_callbacks){0});
+    disk_destroy_progress_bar();
     ui_statusbar_print(status ? error.message : "File exported");
 }
-static int import_file(const char *host_path)
+
+static int import_file(const char* host_path)
 {
-    const char *name = disk_get_basename(host_path);
-    if (strlen(name) > ZFS_NAME_MAX) name = tinyfd_inputBox("Rename File", "Enter a name (max 16 bytes):", "");
-    if (!name || !*name) return 0;
+    const char* name = disk_get_basename(host_path);
+    if (strlen(name) > ZFS_NAME_MAX) {
+        name = tinyfd_inputBox("Rename File", "Enter a name (max 16 bytes):", "");
+    }
+    if (!name || !*name) {
+        return 0;
+    }
     char path[MAX_PATH_LENGTH];
-    if (snprintf(path, sizeof(path), "%s%s", m_part_ctx.address_bar, name) >= (int)sizeof(path)) { ui_statusbar_print("Path is too long"); return 0; }
+    if (snprintf(path, sizeof(path), "%s%s", m_part_ctx.address_bar, name) >= (int) sizeof(path)) {
+        ui_statusbar_print("Path is too long");
+        return 0;
+    }
     zfs_error error;
-    disk_init_progress_bar(); zfs_set_callbacks(m_part_ctx.disk->handle, (zfs_callbacks){.progress=gui_progress});
+    disk_init_progress_bar();
+    zfs_set_callbacks(m_part_ctx.disk->handle, (zfs_callbacks){.progress = gui_progress});
     zfs_status status = zfs_import(m_part_ctx.disk->handle, current_partition(), host_path, path, &error);
-    zfs_set_callbacks(m_part_ctx.disk->handle, (zfs_callbacks){0}); disk_destroy_progress_bar();
-    mutation_result(status, &error, "File import staged"); return status == ZFS_OK;
+    zfs_set_callbacks(m_part_ctx.disk->handle, (zfs_callbacks){0});
+    disk_destroy_progress_bar();
+    mutation_result(status, &error, "File import staged");
+    return status == ZFS_OK;
 }
 
 static void import_files(void)
@@ -249,15 +306,19 @@ static void import_files(void)
     refresh_directory();
 }
 
-
-int ui_partition_viewer_get_partition_usage_percentage(uint64_t *free_bytes, uint64_t *total_bytes)
+int ui_partition_viewer_get_partition_usage_percentage(uint64_t* free_bytes, uint64_t* total_bytes)
 {
     uint64_t available = 0, total = 0;
-    if (m_part_ctx.partition && m_part_ctx.disk)
+    if (m_part_ctx.partition && m_part_ctx.disk) {
         zfs_usage(m_part_ctx.disk->handle, current_partition(), &available, &total, NULL);
-    if (free_bytes) *free_bytes = available;
-    if (total_bytes) *total_bytes = total;
-    return total ? (int)(100 - available * 100 / total) : 0;
+    }
+    if (free_bytes) {
+        *free_bytes = available;
+    }
+    if (total_bytes) {
+        *total_bytes = total;
+    }
+    return total ? (int) (100 - available * 100 / total) : 0;
 }
 
 static void ui_partition_viewer_show_usage(struct nk_context *ctx)
@@ -360,7 +421,8 @@ int ui_partition_viewer(struct nk_context *ctx, disk_info_t* disk, int partition
 
     /* Check if we just switched partitions */
     partition_t* part = NULL;
-    if (disk && partition_idx >= 0 && partition_idx < 4 && disk_is_valid_zealfs_partition(&disk->partitions[partition_idx])) {
+    if (disk && partition_idx >= 0 && partition_idx < 4 &&
+        disk_is_valid_zealfs_partition(&disk->partitions[partition_idx])) {
         part = &disk->partitions[partition_idx];
     }
 
@@ -449,7 +511,8 @@ int ui_partition_viewer(struct nk_context *ctx, disk_info_t* disk, int partition
                 bounds.w = group_bounds.w;
 
                 nk_bool selected = m_part_ctx.selected_file == i;
-                nk_selectable_text(ctx, m_part_ctx.entries[i].name, (int)strlen(m_part_ctx.entries[i].name), NK_TEXT_LEFT, &selected);
+                nk_selectable_text(ctx, m_part_ctx.entries[i].name, (int) strlen(m_part_ctx.entries[i].name),
+                                   NK_TEXT_LEFT, &selected);
                 nk_selectable_text(ctx, m_part_ctx.entries[i].size, ENTRY_SIZE_LEN, NK_TEXT_RIGHT, &selected);
                 nk_selectable_label(ctx, "   ", NK_TEXT_LEFT, &selected);
                 nk_selectable_text(ctx, m_part_ctx.entries[i].type, ENTRY_TYPE_LEN, NK_TEXT_LEFT, &selected);

@@ -1,4 +1,6 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/**
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #include "zealfs.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,34 +16,40 @@
 #include <sys/stat.h>
 #endif
 static zfs_error error;
-#define REQUIRE(x)                                                                                           \
-    do {                                                                                                     \
-        if (!(x)) {                                                                                          \
-            fprintf(stderr, "FAIL %s:%d: %s (%s)\n", __FILE__, __LINE__, #x, error.message);                 \
-            exit(1);                                                                                         \
-        }                                                                                                    \
+#define REQUIRE(x)                                                                                                     \
+    do {                                                                                                               \
+        if (!(x)) {                                                                                                    \
+            fprintf(stderr, "FAIL %s:%d: %s (%s)\n", __FILE__, __LINE__, #x, error.message);                           \
+            exit(1);                                                                                                   \
+        }                                                                                                              \
     } while (0)
 #define OK(x) REQUIRE((x) == ZFS_OK)
-static uint64_t hash(const char *path) {
-    FILE *f = fopen(path, "rb");
+
+static uint64_t hash(const char* path)
+{
+    FILE* f = fopen(path, "rb");
     REQUIRE(f);
     uint64_t h = 1469598103934665603ULL;
     int c;
     while ((c = fgetc(f)) != EOF) {
-        h ^= (unsigned)c;
+        h ^= (unsigned) c;
         h *= 1099511628211ULL;
     }
     fclose(f);
     return h;
 }
-static void empty(zfs_disk *d, int part) {
-    zfs_entry *entries;
+
+static void empty(zfs_disk* d, int part)
+{
+    zfs_entry* entries;
     size_t n;
     OK(zfs_list(d, part, "/", &entries, &n, &error));
     REQUIRE(n == 0);
     zfs_entries_free(entries);
 }
-int main(void) {
+
+int main(void)
+{
     char directory[512];
 #ifdef _WIN32
     char root[MAX_PATH];
@@ -57,7 +65,7 @@ int main(void) {
     snprintf(raw, sizeof(raw), "%s/raw.img", directory);
     snprintf(exported, sizeof(exported), "%s/export.bin", directory);
     snprintf(source, sizeof(source), "%s/source.bin", directory);
-    zfs_disk *d = NULL;
+    zfs_disk* d = NULL;
     int part = -1;
     OK(zfs_image_create(image, 2 * 1024 * 1024, true, &d, &error));
     REQUIRE(access(image, 0) != 0);
@@ -67,8 +75,9 @@ int main(void) {
     empty(d, 0);
     OK(zfs_mkdir(d, 0, "/folder", &error));
     unsigned char payload[70001];
-    for (size_t i = 0; i < sizeof(payload); ++i)
-        payload[i] = (unsigned char)(i * 37);
+    for (size_t i = 0; i < sizeof(payload); ++i) {
+        payload[i] = (unsigned char) (i * 37);
+    }
     OK(zfs_file_write(d, 0, "/folder/test.bin", payload, sizeof(payload), &error));
     OK(zfs_file_write(d, 0, "/empty", NULL, 0, &error));
     unsigned char actual[70001];
@@ -83,7 +92,7 @@ int main(void) {
     OK(zfs_export(d, 0, "/folder/test.bin", exported, false, &error));
     REQUIRE(access(image, 0) != 0);
     REQUIRE(zfs_export(d, 0, "/folder/test.bin", exported, false, &error) == ZFS_EXISTS);
-    FILE *f = fopen(source, "wb");
+    FILE* f = fopen(source, "wb");
     REQUIRE(f);
     REQUIRE(fwrite(payload, 1, sizeof(payload), f) == sizeof(payload));
     fclose(f);
@@ -124,7 +133,7 @@ int main(void) {
     /* A failed large import must leave neither an entry nor partially allocated pages. */
     uint64_t free_before, total, free_after;
     OK(zfs_usage(d, 0, &free_before, &total, &error));
-    unsigned char *large = calloc(1, 1024 * 1024);
+    unsigned char* large = calloc(1, 1024 * 1024);
     REQUIRE(large);
     REQUIRE(zfs_file_write(d, 0, "/too-big", large, 1024 * 1024, &error) == ZFS_NO_SPACE);
     free(large);
@@ -132,16 +141,18 @@ int main(void) {
     REQUIRE(free_before == free_after);
     REQUIRE(!zfs_get_info(d)->pending);
     /* Independent handles do not share staged state. */
-    zfs_disk *other = NULL;
+    zfs_disk* other = NULL;
     OK(zfs_open(image, true, &other, &error));
     OK(zfs_mkdir(d, 0, "/private", &error));
-    zfs_entry *entries;
+    zfs_entry* entries;
     size_t count;
     OK(zfs_list(other, 0, "/", &entries, &count, &error));
     bool seen = false;
-    for (size_t i = 0; i < count; ++i)
-        if (!strcmp(entries[i].name, "private"))
+    for (size_t i = 0; i < count; ++i) {
+        if (!strcmp(entries[i].name, "private")) {
             seen = true;
+        }
+    }
     REQUIRE(!seen);
     zfs_entries_free(entries);
     zfs_close(other);
@@ -196,7 +207,7 @@ int main(void) {
     REQUIRE(total == UINT64_C(4) * 1024 * 1024 * 1024);
     OK(zfs_partition_create(d, 8192, 512, &part, &error));
     REQUIRE(part == 1);
-    REQUIRE((uint64_t)zfs_get_info(d)->partitions[part].start_lba * 512 > UINT32_MAX);
+    REQUIRE((uint64_t) zfs_get_info(d)->partitions[part].start_lba * 512 > UINT32_MAX);
     OK(zfs_file_write(d, part, "/beyond4g", payload, 512, &error));
     OK(zfs_file_read(d, part, "/beyond4g", 0, actual, 512, &n, &error));
     REQUIRE(n == 512 && !memcmp(payload, actual, 512));

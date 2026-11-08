@@ -220,7 +220,7 @@ static void ui_draw_disk(struct nk_context *ctx, const disk_info_t *disk, int* s
         nk_selectable_label(ctx, disk_get_fs_type(part->type), NK_TEXT_LEFT, &select);
 
         /* Partition start address */
-        snprintf(buffer, sizeof(buffer), "0x%08" PRIx64, (uint64_t)part->start_lba * DISK_SECTOR_SIZE);
+        snprintf(buffer, sizeof(buffer), "0x%08" PRIx64, (uint64_t) part->start_lba * DISK_SECTOR_SIZE);
         nk_selectable_label(ctx, buffer, NK_TEXT_LEFT, &select);
 
         /* Partition size */
@@ -635,18 +635,25 @@ static void print_usage(const char* prog)
 #endif
 }
 
-
 static bool ui_can_quit(void)
 {
-    disk_list_state_t *state = disk_get_state();
+    disk_list_state_t* state = disk_get_state();
     for (int i = 0; i < state->disk_count; ++i) {
-        disk_info_t *disk = &state->disks[i];
-        if (!disk->has_staged_changes) continue;
+        disk_info_t* disk = &state->disks[i];
+        if (!disk->has_staged_changes) {
+            continue;
+        }
         char message[1024];
-        snprintf(message, sizeof(message), "Pending changes on %.800s. Apply before quitting?\nYes: apply. No: discard. Cancel: keep editing.", disk->name);
+        snprintf(message, sizeof(message),
+                 "Pending changes on %.800s. Apply before quitting?\nYes: apply. No: discard. Cancel: keep editing.",
+                 disk->name);
         int answer = tinyfd_messageBox("Unsaved changes", message, "yesnocancel", "question", 0);
-        if (!answer) return false;
-        if (answer == 1 && disk_write_changes(disk)) return false;
+        if (!answer) {
+            return false;
+        }
+        if (answer == 1 && disk_write_changes(disk)) {
+            return false;
+        }
     }
     return true;
 }
@@ -715,7 +722,9 @@ int main(int argc, char* argv[]) {
     ui_statusbar_print("Ready!");
 
     while (true) {
-        if (WindowShouldClose() && ui_can_quit()) break;
+        if (WindowShouldClose() && ui_can_quit()) {
+            break;
+        }
         UpdateNuklear(ctx);
 
         /* If any popup is opened, the main window must not be focusable */

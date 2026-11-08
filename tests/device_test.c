@@ -1,4 +1,6 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/**
+ * SPDX-License-Identifier: Apache-2.0
+ */
 /* Link-time native-backend replacement: no real device is ever opened. */
 #include "internal.h"
 #include <stdlib.h>
@@ -8,57 +10,81 @@ static unsigned char media[1024 * 1024];
 static unsigned writes;
 static bool deny_write, fail_write, fail_flush;
 static zfs_error error;
-#define REQUIRE(value)                                                                                       \
-    do {                                                                                                     \
-        if (!(value)) {                                                                                      \
-            fprintf(stderr, "Device test failed at line %d: %s (%s)\n", __LINE__, #value, error.message);    \
-            exit(1);                                                                                         \
-        }                                                                                                    \
+#define REQUIRE(value)                                                                                                 \
+    do {                                                                                                               \
+        if (!(value)) {                                                                                                \
+            fprintf(stderr, "Device test failed at line %d: %s (%s)\n", __LINE__, #value, error.message);              \
+            exit(1);                                                                                                   \
+        }                                                                                                              \
     } while (0)
 #define OK(value) REQUIRE((value) == ZFS_OK)
-zfs_status zfs_native_open(const char *path, bool writing, zfs_native *fd, uint64_t *size, zfs_error *e) {
-    (void)path;
-    if (writing && deny_write)
+
+zfs_status zfs_native_open(const char* path, bool writing, zfs_native* fd, uint64_t* size, zfs_error* e)
+{
+    (void) path;
+    if (writing && deny_write) {
         return zfs_error_set(e, ZFS_PERMISSION, "Simulated permission error");
-    *fd = (zfs_native)(intptr_t)7;
+    }
+    *fd = (zfs_native) (intptr_t) 7;
     *size = sizeof(media);
     return ZFS_OK;
 }
-zfs_status zfs_native_read(zfs_native fd, uint64_t offset, void *data, size_t size, zfs_error *e) {
-    (void)fd;
-    if (offset > sizeof(media) || size > sizeof(media) - offset)
+
+zfs_status zfs_native_read(zfs_native fd, uint64_t offset, void* data, size_t size, zfs_error* e)
+{
+    (void) fd;
+    if (offset > sizeof(media) || size > sizeof(media) - offset) {
         return zfs_error_set(e, ZFS_IO, "Read out of bounds");
+    }
     memcpy(data, media + offset, size);
     return ZFS_OK;
 }
-zfs_status zfs_native_write(zfs_native fd, uint64_t offset, const void *data, size_t size, zfs_error *e) {
-    (void)fd;
-    if (fail_write && writes)
+
+zfs_status zfs_native_write(zfs_native fd, uint64_t offset, const void* data, size_t size, zfs_error* e)
+{
+    (void) fd;
+    if (fail_write && writes) {
         return zfs_error_set(e, ZFS_IO, "Simulated removed media after first sector");
-    if (offset > sizeof(media) || size > sizeof(media) - offset)
+    }
+    if (offset > sizeof(media) || size > sizeof(media) - offset) {
         return zfs_error_set(e, ZFS_IO, "Write out of bounds");
+    }
     memcpy(media + offset, data, size);
     ++writes;
     return ZFS_OK;
 }
-zfs_status zfs_native_sync(zfs_native fd, zfs_error *e) {
-    (void)fd;
+
+zfs_status zfs_native_sync(zfs_native fd, zfs_error* e)
+{
+    (void) fd;
     return fail_flush ? zfs_error_set(e, ZFS_IO, "Simulated flush failure") : ZFS_OK;
 }
-void zfs_native_close(zfs_native fd) { (void)fd; }
-zfs_status zfs_native_guard(zfs_native *fd, const char *path, bool image, bool writing, zfs_error *e) {
-    (void)fd;
-    (void)path;
-    (void)image;
-    (void)writing;
-    (void)e;
+
+void zfs_native_close(zfs_native fd)
+{
+    (void) fd;
+}
+
+zfs_status zfs_native_guard(zfs_native* fd, const char* path, bool image, bool writing, zfs_error* e)
+{
+    (void) fd;
+    (void) path;
+    (void) image;
+    (void) writing;
+    (void) e;
     return ZFS_OK;
 }
-bool zfs_native_same(zfs_native a, zfs_native b) { return a == b; }
-static zfs_disk *staged(void) {
+
+bool zfs_native_same(zfs_native a, zfs_native b)
+{
+    return a == b;
+}
+
+static zfs_disk* staged(void)
+{
     memset(media, 0, sizeof(media));
     writes = 0;
-    zfs_disk *d = NULL;
+    zfs_disk* d = NULL;
     OK(zfs_open("simulated-device", false, &d, &error));
     OK(zfs_mbr_create(d, &error));
     OK(zfs_partition_create(d, 8192, 512, NULL, &error));
@@ -66,8 +92,10 @@ static zfs_disk *staged(void) {
     REQUIRE(writes == 0 && media[510] == 0);
     return d;
 }
-int main(void) {
-    zfs_disk *d = staged();
+
+int main(void)
+{
+    zfs_disk* d = staged();
     OK(zfs_discard(d, &error));
     REQUIRE(writes == 0 && media[510] == 0);
     zfs_close(d);

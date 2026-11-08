@@ -171,14 +171,9 @@ static inline int zealfsv2_format(uint8_t* partition, uint64_t size) {
         /* It's always the last page that has the reserved pages, generate the bitmap */
         uint32_t bitmap = 0xFF << last_valid_pages_count;
         header->pages_bitmap[header->bitmap_size - 1] = (uint8_t) (bitmap & 0xff);
-
     }
 
-
-
 #if 0
-
-
 
 #endif
 
@@ -241,8 +236,7 @@ int zealfs_open(const char * path, zealfs_context_t* ctx, zealfs_fd_t* fd);
  * @param offset The offset in the file from which to start reading.
  * @return The number of bytes read on success, or a negative error code on failure.
  */
-int zealfs_read(zealfs_context_t* ctx, zealfs_fd_t* fd, void *buf, size_t size, int64_t offset);
-
+int zealfs_read(zealfs_context_t* ctx, zealfs_fd_t* fd, void* buf, size_t size, int64_t offset);
 
 /**
  * @brief Creates a new directory in the ZealFS file system.
@@ -314,7 +308,6 @@ int zealfs_rmdir(const char* path, zealfs_context_t* ctx);
  */
 uint64_t zealfs_free_space(zealfs_context_t* ctx);
 
-
 /**
  * Determines the size of the partition based on the count of bitmap pages.
  *
@@ -327,7 +320,6 @@ uint64_t zealfs_free_space(zealfs_context_t* ctx);
  */
 uint64_t zealfs_total_space(zealfs_context_t* ctx);
 
-
 /**
  * @brief Writes data to a specified entry in the filesystem.
  *
@@ -339,9 +331,7 @@ uint64_t zealfs_total_space(zealfs_context_t* ctx);
  *
  * @return 0 on success, or a negative error code on failure.
  */
-int zealfs_write(zealfs_context_t* ctx, zealfs_fd_t* fd,
-                void *buf, size_t size, int64_t offset);
-
+int zealfs_write(zealfs_context_t* ctx, zealfs_fd_t* fd, void* buf, size_t size, int64_t offset);
 
 /**
  * @brief Applies changes to the File Allocation Table (FAT) and header on the disk.
@@ -357,4 +347,4 @@ int zealfs_write(zealfs_context_t* ctx, zealfs_fd_t* fd,
 int zealfs_flush(zealfs_context_t* ctx, zealfs_fd_t* fd);
 
 /* Private engine helper: unlike opendir, returns the entry's metadata address. */
-int zealfs_stat(const char *path, zealfs_context_t *ctx, zealfs_fd_t *fd);
+int zealfs_stat(const char* path, zealfs_context_t* ctx, zealfs_fd_t* fd);

@@ -1,13 +1,18 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/**
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #include "cli.h"
 #include "app_version.h"
 #include <stdio.h>
 
-void cli_usage(void) {
+void cli_usage(void)
+{
     puts("Usage: zdt [options] COMMAND [arguments]\n"
          "       zdt [--image PATH | --device PATH] shell");
 }
-void cli_help(void) {
+
+void cli_help(void)
+{
     puts("zdt " VERSION " — ZealFS v2 disk and image manager");
     cli_usage();
     puts("\nOptions:\n"
@@ -45,7 +50,9 @@ void cli_help(void) {
          "Exit: 0 success, 1 operation error, 2 usage, 3 confirmation.\n"
          "Shell input supports single/double quoted arguments; no expansion.");
 }
-void cli_shell_help(void) {
+
+void cli_shell_help(void)
+{
     puts("Shell commands:\n"
          "  open -i PATH | -d PATH          Open an image or physical device\n"
          "  devices                        List available physical disks\n"

@@ -59,20 +59,33 @@ static inline int get_page_size(const zealfs_header_t* header)
 
 
 static inline int check_header(zealfs_context_t* ctx) {
-    zealfs_header_t* header = (zealfs_header_t*)ctx->header;
-    if (ctx->header_size) return 0;
-    if (ctx->read(ctx->arg, ctx->header, 0, sizeof(zealfs_header_t)) != sizeof(zealfs_header_t)) return -EIO;
-    if (header->magic != 'Z' || header->version != 2 || header->page_size > 8 || !header->bitmap_size || header->bitmap_size > 8192) return -EIO;
+    zealfs_header_t* header = (zealfs_header_t*) ctx->header;
+    if (ctx->header_size) {
+        return 0;
+    }
+    if (ctx->read(ctx->arg, ctx->header, 0, sizeof(zealfs_header_t)) != sizeof(zealfs_header_t)) {
+        return -EIO;
+    }
+    if (header->magic != 'Z' || header->version != 2 || header->page_size > 8 || !header->bitmap_size ||
+        header->bitmap_size > 8192) {
+        return -EIO;
+    }
     size_t header_size = get_fs_header_size(header);
     size_t page_size = get_page_size(header);
-    size_t pages = (size_t)header->bitmap_size * 8;
+    size_t pages = (size_t) header->bitmap_size * 8;
     size_t fat_size = page_size == 256 ? page_size : 2 * page_size;
-    if (header_size > page_size || pages > (page_size == 256 ? fat_size : fat_size / 2) || header->free_pages > pages) return -EIO;
-    if (ctx->read(ctx->arg, ctx->header, 0, header_size) != (ssize_t)header_size ||
-        ctx->read(ctx->arg, ctx->fat, page_size, fat_size) != (ssize_t)fat_size) return -EIO;
+    if (header_size > page_size || pages > (page_size == 256 ? fat_size : fat_size / 2) || header->free_pages > pages) {
+        return -EIO;
+    }
+    if (ctx->read(ctx->arg, ctx->header, 0, header_size) != (ssize_t) header_size ||
+        ctx->read(ctx->arg, ctx->fat, page_size, fat_size) != (ssize_t) fat_size) {
+        return -EIO;
+    }
     for (size_t i = 0; i < pages; ++i) {
-        uint16_t next = page_size == 256 ? ((uint8_t*)ctx->fat)[i] : ctx->fat[i];
-        if (next && (next < (page_size == 256 ? 2 : 3) || next >= pages)) return -EIO;
+        uint16_t next = page_size == 256 ? ((uint8_t*) ctx->fat)[i] : ctx->fat[i];
+        if (next && (next < (page_size == 256 ? 2 : 3) || next >= pages)) {
+            return -EIO;
+        }
     }
     ctx->header_size = header_size;
     ctx->fat_size = fat_size;
@@ -122,7 +135,9 @@ static inline uint8_t to_bcd(int value) {
  *
  */
 static inline void free_page(zealfs_header_t* header, uint16_t page) {
-    if (!page || page >= header->bitmap_size * 8u) return;
+    if (!page || page >= header->bitmap_size * 8u) {
+        return;
+    }
     header->pages_bitmap[page / 8] &= ~(1 << (page % 8));
     header->free_pages++;
 }
@@ -135,7 +150,9 @@ static uint16_t get_next_from_fat(zealfs_context_t* ctx, uint16_t current_page)
 {
     const zealfs_header_t* header = (zealfs_header_t*) ctx->header;
     assert(header->magic != 0);
-    if (current_page >= header->bitmap_size * 8u) return 0;
+    if (current_page >= header->bitmap_size * 8u) {
+        return 0;
+    }
     if (header->page_size == 0) {
         /* 256-byte pages */
         return ((uint8_t*) ctx->fat)[current_page];
@@ -152,7 +169,9 @@ static void set_next_in_fat(zealfs_context_t* ctx, uint16_t current_page, uint16
 {
     const zealfs_header_t* header = (zealfs_header_t*) ctx->header;
     assert(header->magic != 0);
-    if (current_page >= header->bitmap_size * 8u) return;
+    if (current_page >= header->bitmap_size * 8u) {
+        return;
+    }
     if (header->page_size == 0) {
         /* 256-byte pages */
         ((uint8_t*) ctx->fat)[current_page] = next_page;
@@ -202,16 +221,15 @@ uint64_t zealfs_free_space(zealfs_context_t* ctx)
 {
     zealfs_header_t* header = (zealfs_header_t*) ctx->header;
     assert (check_header(ctx) == 0);
-    return (uint64_t)header->free_pages * get_page_size(header);
+    return (uint64_t) header->free_pages * get_page_size(header);
 }
-
 
 uint64_t zealfs_total_space(zealfs_context_t* ctx)
 {
     zealfs_header_t* header = (zealfs_header_t*) ctx->header;
     assert (check_header(ctx) == 0);
     const uint32_t pages_count = (uint32_t) header->bitmap_size * 8U;
-    return (uint64_t)pages_count * get_page_size(header);
+    return (uint64_t) pages_count * get_page_size(header);
 }
 
 
@@ -270,7 +288,9 @@ next_component:
 
     unsigned chain_count = 0;
     while (1) {
-        if (++chain_count > header->bitmap_size * 8u || (unsigned)current_page >= header->bitmap_size * 8u) return -EIO;
+        if (++chain_count > header->bitmap_size * 8u || (unsigned) current_page >= header->bitmap_size * 8u) {
+            return -EIO;
+        }
         /* Read all the entries from disk */
         int rd = ctx->read(ctx->arg, (void*) entries, entries_addr, max_entries * sizeof(zealfs_entry_t));
         if (rd < 0) {
@@ -298,7 +318,9 @@ next_component:
                     return 1;
                 } else {
                     /* Only directories can be traversed. */
-                    if (!(entries[i].flags & IS_DIR)) return -ENOTDIR;
+                    if (!(entries[i].flags & IS_DIR)) {
+                        return -ENOTDIR;
+                    }
                     path = slash + 1;
                     entries_addr = ADDR_FROM_PAGE(header, entries[i].start_page);
                     root = 0;
@@ -342,7 +364,9 @@ int zealfs_open(const char * path, zealfs_context_t* ctx, zealfs_fd_t* fd)
     }
 
     int index = browse_path(ctx, path + 1, get_root_dir_addr(header), 1, &info);
-    if (index < 0) return index;
+    if (index < 0) {
+        return index;
+    }
     if (index != 0) {
         /* Check that the entry is a file */
         if ((info.entry.flags & 1) == 0) {
@@ -370,7 +394,9 @@ int zealfs_unlink(const char* path, zealfs_context_t* ctx)
     }
 
     int index = browse_path(ctx, path + 1, get_root_dir_addr(header), 1, &info);
-    if (index < 0) return index;
+    if (index < 0) {
+        return index;
+    }
     if (index == 0) {
         return -ENOENT;
     }
@@ -383,7 +409,9 @@ int zealfs_unlink(const char* path, zealfs_context_t* ctx)
     uint16_t page = info.entry.start_page;
     unsigned chain_count = 0;
     while (page != 0) {
-        if (++chain_count > header->bitmap_size * 8u || page < 2 || page >= header->bitmap_size * 8u) return -EIO;
+        if (++chain_count > header->bitmap_size * 8u || page < 2 || page >= header->bitmap_size * 8u) {
+            return -EIO;
+        }
         free_page(header, page);
         const uint16_t next = get_next_from_fat(ctx, page);
         set_next_in_fat(ctx, page, 0);
@@ -507,7 +535,9 @@ int zealfs_rmdir(const char* path, zealfs_context_t* ctx)
     }
 
     int index = browse_path(ctx, path + 1, get_root_dir_addr(header), 1, &info);
-    if (index < 0) return index;
+    if (index < 0) {
+        return index;
+    }
     if (index == 0) {
         return -ENOENT;
     }
@@ -520,7 +550,10 @@ int zealfs_rmdir(const char* path, zealfs_context_t* ctx)
 
     unsigned chain_count = 0;
     while (current_page != 0) {
-        if (++chain_count > header->bitmap_size * 8u || current_page < 2 || (unsigned)current_page >= header->bitmap_size * 8u) return -EIO;
+        if (++chain_count > header->bitmap_size * 8u || current_page < 2 ||
+            (unsigned) current_page >= header->bitmap_size * 8u) {
+            return -EIO;
+        }
         const uint32_t page_addr = ADDR_FROM_PAGE(header, current_page);
         int rd = ctx->read(ctx->arg, (void*) entries, page_addr, max_entries * sizeof(zealfs_entry_t));
         if (rd < 0) {
@@ -641,14 +674,18 @@ static int zealfs_create_both(zealfs_context_t* ctx, int isdir, const char * pat
     time(&rawtime);
     struct tm timestamp;
 #ifdef _WIN32
-    if (localtime_s(&timestamp, &rawtime)) return -EIO;
+    if (localtime_s(&timestamp, &rawtime)) {
+        return -EIO;
+    }
 #else
-    if (!localtime_r(&rawtime, &timestamp)) return -EIO;
+    if (!localtime_r(&rawtime, &timestamp)) {
+        return -EIO;
+    }
 #endif
     const struct tm* timest = &timestamp;
     /* Got the time, populate it in the structure */
     entry.year[0] = to_bcd((1900 + timest->tm_year) / 100);   /* 20 first */
-    entry.year[1] = to_bcd((1900 + timest->tm_year) % 100);         /* 22 then */
+    entry.year[1] = to_bcd((1900 + timest->tm_year) % 100);   /* 22 then */
     entry.month = to_bcd(timest->tm_mon + 1);
     entry.day = to_bcd(timest->tm_mday);
     entry.date = to_bcd(timest->tm_wday);
@@ -739,8 +776,7 @@ int zealfs_mkdir(const char * path, zealfs_context_t* ctx, zealfs_fd_t* fd)
  *
  * @return number of bytes read from the file.
  */
-int zealfs_read(zealfs_context_t* ctx, zealfs_fd_t* fd,
-                void *buf, size_t size, int64_t offset)
+int zealfs_read(zealfs_context_t* ctx, zealfs_fd_t* fd, void* buf, size_t size, int64_t offset)
 {
     zealfs_header_t* header = (zealfs_header_t*) ctx->header;
     if (check_header(ctx) || fd == NULL) {
@@ -755,7 +791,9 @@ int zealfs_read(zealfs_context_t* ctx, zealfs_fd_t* fd,
     int jump_pages = offset / data_bytes_per_page;
     int offset_in_page = offset % data_bytes_per_page;
 
-    if (offset < 0 || (uint64_t)offset > entry->size) return -EINVAL;
+    if (offset < 0 || (uint64_t) offset > entry->size) {
+        return -EINVAL;
+    }
     const uint32_t remaining_in_file = entry->size - offset;
     if (remaining_in_file < size) {
         size = remaining_in_file;
@@ -764,7 +802,9 @@ int zealfs_read(zealfs_context_t* ctx, zealfs_fd_t* fd,
 
     uint_fast16_t current_page = entry->start_page;
     while (jump_pages) {
-        if (current_page < 2 || (unsigned)current_page >= header->bitmap_size * 8u) return -EIO;
+        if (current_page < 2 || (unsigned) current_page >= header->bitmap_size * 8u) {
+            return -EIO;
+        }
         current_page = get_next_from_fat(ctx, current_page);
         jump_pages--;
     }
@@ -772,12 +812,16 @@ int zealfs_read(zealfs_context_t* ctx, zealfs_fd_t* fd,
     uint32_t page_addr = ADDR_FROM_PAGE(header, current_page);
 
     while (size) {
-        if (current_page < (header->page_size == 0 ? 2 : 3) || current_page >= header->bitmap_size * 8u) return -EIO;
-        int count = MIN((size_t)(data_bytes_per_page - offset_in_page), size);
+        if (current_page < (header->page_size == 0 ? 2 : 3) || current_page >= header->bitmap_size * 8u) {
+            return -EIO;
+        }
+        int count = MIN((size_t) (data_bytes_per_page - offset_in_page), size);
         /* Read data from disk */
-        if (ctx->read(ctx->arg, buf, page_addr + offset_in_page, count) != count) return -EIO;
-        buf = (uint8_t *)buf + count;
-        if (size != (size_t)count) {
+        if (ctx->read(ctx->arg, buf, page_addr + offset_in_page, count) != count) {
+            return -EIO;
+        }
+        buf = (uint8_t*) buf + count;
+        if (size != (size_t) count) {
             current_page = get_next_from_fat(ctx, current_page);
             page_addr = ADDR_FROM_PAGE(header, current_page);
         }
@@ -803,9 +847,7 @@ static int allocate_next(zealfs_context_t* ctx, zealfs_header_t* header, uint_fa
     return next;
 }
 
-
-int zealfs_write(zealfs_context_t* ctx, zealfs_fd_t* fd,
-                 void *buf, size_t size, int64_t offset)
+int zealfs_write(zealfs_context_t* ctx, zealfs_fd_t* fd, void* buf, size_t size, int64_t offset)
 {
     zealfs_header_t* header = (zealfs_header_t*) ctx->header;
     if (check_header(ctx) || fd == NULL) {
@@ -831,7 +873,9 @@ int zealfs_write(zealfs_context_t* ctx, zealfs_fd_t* fd,
     uint_fast16_t current_page = fd->entry.start_page;
 
     while (jump_pages) {
-        if (current_page < 2 || (unsigned)current_page >= header->bitmap_size * 8u) return -EIO;
+        if (current_page < 2 || (unsigned) current_page >= header->bitmap_size * 8u) {
+            return -EIO;
+        }
         int next_page = get_next_from_fat(ctx, current_page);
         if (next_page == 0) {
             /* There is no more pages to browse but we need to write new data, so allocate a new page.
@@ -852,17 +896,21 @@ int zealfs_write(zealfs_context_t* ctx, zealfs_fd_t* fd,
 
     while (size) {
         /* Data page cannot be 0 (header) or FAT (1 for sure) */
-        if (current_page < (header->page_size == 0 ? 2 : 3) || (unsigned)current_page >= header->bitmap_size * 8u) return -EIO;
+        if (current_page < (header->page_size == 0 ? 2 : 3) || (unsigned) current_page >= header->bitmap_size * 8u) {
+            return -EIO;
+        }
         uint32_t page_addr = ADDR_FROM_PAGE(header, current_page);
-        uint32_t count = MIN((size_t)(data_bytes_per_page - offset_in_page), size);
+        uint32_t count = MIN((size_t) (data_bytes_per_page - offset_in_page), size);
 
         int wr = ctx->write(ctx->arg, buf, page_addr + offset_in_page, count);
         if (wr < 0) {
 
             return wr;
         }
-        if ((uint64_t)offset + (total - size) + count > fd->entry.size) fd->entry.size = (uint32_t)((uint64_t)offset + (total - size) + count);
-        buf = (uint8_t *)buf + count;
+        if ((uint64_t) offset + (total - size) + count > fd->entry.size) {
+            fd->entry.size = (uint32_t) ((uint64_t) offset + (total - size) + count);
+        }
+        buf = (uint8_t*) buf + count;
         size -= count;
 
         /* In all cases, check the next page */
@@ -939,7 +987,9 @@ int zealfs_opendir(const char * path, zealfs_context_t* ctx, zealfs_fd_t* fd)
     }
 
     int index = browse_path(ctx, path + 1, get_root_dir_addr(header), 1, &info);
-    if (index < 0) return index;
+    if (index < 0) {
+        return index;
+    }
     if (index != 0) {
         /* Check that the entry is a directory */
         if (info.entry.flags & 1) {
@@ -975,21 +1025,26 @@ int zealfs_readdir(zealfs_context_t* ctx, zealfs_fd_t* fd, zealfs_entry_t* ret_e
 
     unsigned chain_count = 0;
     while (1) {
-        if (++chain_count > header->bitmap_size * 8u || (unsigned)current_page >= header->bitmap_size * 8u) return -EIO;
+        if (++chain_count > header->bitmap_size * 8u || (unsigned) current_page >= header->bitmap_size * 8u) {
+            return -EIO;
+        }
         /* Read all the entries from disk */
         int rd = ctx->read(ctx->arg, (void*) entries, current_addr, max_entries * sizeof(zealfs_entry_t));
-        if (rd < 0) return rd;
+        if (rd < 0) {
+            return rd;
+        }
 
         /* Browse each entry, looking for a non-empty one thanks to the flags */
         for (int i = 0; i < max_entries; i++) {
             const uint8_t flags = entries[i].flags;
             if (flags & IS_OCCUPIED) {
-                if (filled_count >= count) return -ENOBUFS;
+                if (filled_count >= count) {
+                    return -ENOBUFS;
+                }
                 ret_entries[filled_count] = entries[i];
                 filled_count++;
             }
         }
-
 
         max_entries = get_dir_max_entries(header);
         /* Get the next page of the directory */
@@ -1011,11 +1066,20 @@ void zealfs_destroy(zealfs_context_t* ctx)
     ctx->header_size = ctx->fat_size = 0;
 }
 
-int zealfs_stat(const char *path, zealfs_context_t *ctx, zealfs_fd_t *fd) {
-    if (check_header(ctx) || !fd || !strcmp(path, "/")) return -EINVAL;
+int zealfs_stat(const char* path, zealfs_context_t* ctx, zealfs_fd_t* fd)
+{
+    if (check_header(ctx) || !fd || !strcmp(path, "/")) {
+        return -EINVAL;
+    }
     browse_out_t info;
-    int result = browse_path(ctx, path + 1, get_root_dir_addr((zealfs_header_t *)ctx->header), 1, &info);
-    if (result < 0) return result;
-    if (!result) return -ENOENT;
-    fd->entry = info.entry; fd->entry_addr = info.entry_addr; return 0;
+    int result = browse_path(ctx, path + 1, get_root_dir_addr((zealfs_header_t*) ctx->header), 1, &info);
+    if (result < 0) {
+        return result;
+    }
+    if (!result) {
+        return -ENOENT;
+    }
+    fd->entry = info.entry;
+    fd->entry_addr = info.entry_addr;
+    return 0;
 }

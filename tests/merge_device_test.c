@@ -1,4 +1,6 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/**
+ * SPDX-License-Identifier: Apache-2.0
+ */
 /* Memory-only devices; the native layer is replaced at link time. */
 #include "internal.h"
 #include <stdlib.h>
@@ -14,61 +16,94 @@ static unsigned char media[131072], source_media[131072], original[131072], sour
 static bool mounted, target_mounted, deny, corrupt, flush_failure, fail_after_sector;
 static unsigned writes;
 static zfs_error error;
-#define REQUIRE(x)                                                                                           \
-    do {                                                                                                     \
-        if (!(x)) {                                                                                          \
-            fprintf(stderr, "FAIL %d: %s (%s)\n", __LINE__, #x, error.message);                              \
-            exit(1);                                                                                         \
-        }                                                                                                    \
+#define REQUIRE(x)                                                                                                     \
+    do {                                                                                                               \
+        if (!(x)) {                                                                                                    \
+            fprintf(stderr, "FAIL %d: %s (%s)\n", __LINE__, #x, error.message);                                        \
+            exit(1);                                                                                                   \
+        }                                                                                                              \
     } while (0)
 #define OK(x) REQUIRE((x) == ZFS_OK)
-zfs_status zfs_native_open(const char *path, bool writing, zfs_native *fd, uint64_t *size, zfs_error *e) {
-    if (writing && deny)
+
+zfs_status zfs_native_open(const char* path, bool writing, zfs_native* fd, uint64_t* size, zfs_error* e)
+{
+    if (writing && deny) {
         return zfs_error_set(e, ZFS_PERMISSION, "Permission denied");
-    *fd = (zfs_native)(intptr_t)(!strcmp(path, "source") ? 8 : 7);
+    }
+    *fd = (zfs_native) (intptr_t) (!strcmp(path, "source") ? 8 : 7);
     *size = sizeof(media);
     return ZFS_OK;
 }
-static unsigned char *bytes(zfs_native fd) { return (intptr_t)fd == 8 ? source_media : media; }
-zfs_status zfs_native_read(zfs_native fd, uint64_t offset, void *buffer, size_t size, zfs_error *e) {
-    if (offset > sizeof(media) || size > sizeof(media) - offset)
+
+static unsigned char* bytes(zfs_native fd)
+{
+    return (intptr_t) fd == 8 ? source_media : media;
+}
+
+zfs_status zfs_native_read(zfs_native fd, uint64_t offset, void* buffer, size_t size, zfs_error* e)
+{
+    if (offset > sizeof(media) || size > sizeof(media) - offset) {
         return zfs_error_set(e, ZFS_IO, "Read bounds");
+    }
     memcpy(buffer, bytes(fd) + offset, size);
     return ZFS_OK;
 }
-zfs_status zfs_native_write(zfs_native fd, uint64_t offset, const void *buffer, size_t size, zfs_error *e) {
-    REQUIRE((intptr_t)fd == 7);
-    if (fail_after_sector && writes)
+
+zfs_status zfs_native_write(zfs_native fd, uint64_t offset, const void* buffer, size_t size, zfs_error* e)
+{
+    REQUIRE((intptr_t) fd == 7);
+    if (fail_after_sector && writes) {
         return zfs_error_set(e, ZFS_IO, "Media removed");
-    if (offset > sizeof(media) || size > sizeof(media) - offset)
+    }
+    if (offset > sizeof(media) || size > sizeof(media) - offset) {
         return zfs_error_set(e, ZFS_IO, "Write bounds");
+    }
     memcpy(media + offset, buffer, size);
-    if (corrupt)
+    if (corrupt) {
         media[offset] ^= 1;
+    }
     ++writes;
     return ZFS_OK;
 }
-zfs_status zfs_native_sync(zfs_native fd, zfs_error *e) {
-    (void)fd;
+
+zfs_status zfs_native_sync(zfs_native fd, zfs_error* e)
+{
+    (void) fd;
     return flush_failure ? zfs_error_set(e, ZFS_IO, "Flush failed") : ZFS_OK;
 }
-void zfs_native_close(zfs_native fd) { (void)fd; }
-bool zfs_native_same(zfs_native a, zfs_native b) { return a == b; }
-zfs_status zfs_native_guard(zfs_native *fd, const char *path, bool image, bool writing, zfs_error *e) {
-    (void)fd;
-    (void)path;
-    if (!image && (mounted || (target_mounted && writing)))
+
+void zfs_native_close(zfs_native fd)
+{
+    (void) fd;
+}
+
+bool zfs_native_same(zfs_native a, zfs_native b)
+{
+    return a == b;
+}
+
+zfs_status zfs_native_guard(zfs_native* fd, const char* path, bool image, bool writing, zfs_error* e)
+{
+    (void) fd;
+    (void) path;
+    if (!image && (mounted || (target_mounted && writing))) {
         return zfs_error_set(e, ZFS_BUSY, "Device is mounted; unmount it");
-    if (!image && writing && deny)
+    }
+    if (!image && writing && deny) {
         return zfs_error_set(e, ZFS_PERMISSION, "Permission denied");
+    }
     return ZFS_OK;
 }
-static zfs_disk *open_target(void) {
-    zfs_disk *d = NULL;
+
+static zfs_disk* open_target(void)
+{
+    zfs_disk* d = NULL;
     OK(zfs_open("target", false, &d, &error));
     return d;
 }
-int main(void) {
+
+int main(void)
+{
     char dir[512];
 #ifdef _WIN32
     char root[MAX_PATH];
@@ -81,7 +116,7 @@ int main(void) {
 #endif
     char backup[600];
     snprintf(backup, sizeof(backup), "%s/before.img", dir);
-    zfs_disk *d = open_target();
+    zfs_disk* d = open_target();
     OK(zfs_mbr_create(d, &error));
     OK(zfs_partition_create(d, 65536, 512, NULL, &error));
     OK(zfs_file_write(d, 0, "/app", "old version", 11, &error));
@@ -100,11 +135,11 @@ int main(void) {
     memcpy(source_before, source_media, sizeof(source_media));
     memcpy(media, original, sizeof(media));
     writes = 0;
-    zfs_disk *source = NULL;
+    zfs_disk* source = NULL;
     OK(zfs_open("source", false, &source, &error));
     d = open_target();
     zfs_merge_report report = {0};
-    zfs_merge_plan *plan = NULL;
+    zfs_merge_plan* plan = NULL;
     mounted = true;
     REQUIRE(zfs_merge_prepare(source, 0, d, 0, &plan, &report, &error) == ZFS_BUSY);
     REQUIRE(!plan && !writes);
@@ -158,12 +193,13 @@ int main(void) {
         OK(zfs_open("source", false, &source, &error));
         OK(zfs_merge_prepare(source, 0, d, 0, &plan, &report, &error));
         OK(zfs_merge_stage(plan, backup, &error));
-        if (test == 0)
+        if (test == 0) {
             fail_after_sector = true;
-        else if (test == 1)
+        } else if (test == 1) {
             flush_failure = true;
-        else
+        } else {
             media[1024] ^= 1;
+        }
         zfs_status status = zfs_apply(d, &error);
         if (test < 2) {
             REQUIRE(status == ZFS_PARTIAL_WRITE && zfs_get_info(d)->failed);

@@ -77,3 +77,14 @@ The `gui_package` target creates the legacy GUI-specific `.app` or AppImage. The
 `ctest --test-dir BUILD_DIRECTORY --output-on-failure` runs the tests enabled for that build. The suites use temporary images and simulated devices; terminal-history tests use a pseudo-terminal on macOS/Linux. They cover staging, transfers, merge/restore, failure handling and command output. These tests do not exercise a physical TF card.
 
 See the [shared C API guide](API.md) for embedding the library.
+
+
+## C formatting
+
+The repository's [.clang-format](../.clang-format) follows the existing C conventions: four-space indentation, function braces on a separate line, attached control-flow braces, and pointer stars attached to the type. Use clang-format 15 or newer for the shared core, frontend code and C tests. For example, from the repository root:
+
+```sh
+clang-format --style=file -i src/cli/args.c
+```
+
+For changes to existing files, format the edited sections. Keep bundled third-party headers and untouched renderer code in their existing format.
