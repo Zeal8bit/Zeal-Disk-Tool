@@ -14,7 +14,7 @@ def run(*args, data=None, code=0):
     return result
 
 def tree(path):
-    return {str(p.relative_to(path)): None if p.is_dir() else p.read_bytes() for p in path.rglob('*')}
+    return {p.relative_to(path).as_posix(): None if p.is_dir() else p.read_bytes() for p in path.rglob('*')}
 
 with tempfile.TemporaryDirectory(prefix='zdt-export-') as temp:
     root = pathlib.Path(temp)
