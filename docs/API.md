@@ -1,5 +1,7 @@
 # Shared C API
 
+[README](../README.md) · [CLI guide](CLI.md) · [GUI guide](GUI.md) · [ZealFS concepts](ZEALFS.md) · [Disk operations](DISKS.md) · [Build/install](BUILD.md)
+
 `include/zealfs.h` is the public interface. Link the CMake target `zealfs_core` or the installed static library. It has no GUI or console dependencies. The disk and session are represented by one opaque `zfs_disk` handle; each handle owns its image/device descriptor, temporary sector overlay and callbacks. Multiple handles are independent, with no global current disk or partition.
 
 ```c
@@ -26,7 +28,7 @@ int create_image(void) {
 - `zfs_get_info` returns a borrowed snapshot valid until the next operation or close. Never modify it.
 - `zfs_list` returns owned normalized entries, including names, sizes, types and decoded timestamps. Release them with `zfs_entries_free`; an empty listing is valid.
 - Status is always returned explicitly. Error details are caller-owned and meaningful on failure; pass NULL if details are unnecessary. The core never prints, opens dialogs, or exits the application.
-- All API partition indices are zero-based. Frontends translate user-visible partition numbers 1–4. API paths use `/` within the filesystem, independently of the host OS; dot components and trailing slashes are rejected except for root `/`. The CLI accepts optional leading/trailing slashes and normalizes its filesystem arguments before calling the API.
+- All API partition indices are zero-based. The CLI translates user-visible partition numbers 1–4; the GUI labels slots 0–3. API paths use `/` within the filesystem, independently of the host OS; dot components and trailing slashes are rejected except for root `/`. The CLI accepts optional leading/trailing slashes and normalizes its filesystem arguments before calling the API.
 - Each handle is single-threaded. Different handles can be used independently; do not concurrently apply to the same target. Progress/log callbacks run synchronously and must not reenter that handle.
 
 ## Staging contract
@@ -45,7 +47,7 @@ Ordinary device Apply opens the selected device for writing at commit time and f
 
 Disks/images are sector-aligned, from 512 bytes through 64 GiB. ZealFS partitions are 8 KiB–4 GiB; file sizes are limited by the existing v2 on-disk format. Public disk sizes, offsets, usage counters and transfer progress use 64-bit values, with large-file support enabled for ARM32 builds. Platform device backends reject non-512-byte logical sectors.
 
-The existing `zealfs_v2` engine remains private. Its on-disk layout is unchanged. GUI adapter structs in `disk.h` are presentation models, not part of this public API. A future CLI or another frontend should call `zealfs.h` directly rather than depend on those structs.
+The existing `zealfs_v2` engine remains private. Its on-disk layout is unchanged. GUI adapter structs in `disk.h` are presentation models, not part of this public API. Other frontends should call `zealfs.h` directly rather than depend on those structs.
 
 
 ## Merge and restore
@@ -61,3 +63,12 @@ When backing up, `zfs_merge_check_backup` checks the destination and host free s
 `zfs_restore_prepare(raw_backup_path, target, partition, &plan, &report, &error)` requires a valid raw ZealFS partition backup with exactly the target partition capacity. Damaged target filesystem headers are supported after reopening; a damaged MBR needs separate recovery. `zfs_restore_stage` attaches the prepared restoration.
 
 Only `zfs_apply` commits either operation. Merge/restore request flush and readback verification, including later shell edits. For a physical merge with a backup, Apply additionally compares the original partition to the retained backup before any writes. Failures retain the backup; physical write failures return `ZFS_PARTIAL_WRITE` and require reopening. `zfs_recovery_backup` and `zfs_recovery_partition` identify an available recovery image. Discard removes staged changes and recovery association, leaving the backup file in place. There is no automatic rollback.
+
+
+## Source layout
+
+- [src/cli/](../src/cli/): terminal frontend, with its entry point in [main.c](../src/cli/main.c).
+- [src/ui/](../src/ui/): GUI frontend, including its [entry point](../src/ui/main.c), [disk adapter](../src/ui/disk.c), controls and Nuklear/Raylib integration.
+- [src/zealfs/](../src/zealfs/): shared filesystem operations, host I/O and platform device backends used by both frontends.
+
+The GUI adapter translates shared API data into presentation models. Platform-specific device discovery and access remain in the shared core, independently of either frontend.

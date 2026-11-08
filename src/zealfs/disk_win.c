@@ -1,6 +1,6 @@
 /* SPDX-FileCopyrightText: 2025 Zeal 8-bit Computer <contact@zeal8bit.com>
  * SPDX-License-Identifier: Apache-2.0 */
-#include "zealfs/internal.h"
+#include "internal.h"
 #include <string.h>
 
 static zfs_status win_error(zfs_error *e, const char *operation) {
