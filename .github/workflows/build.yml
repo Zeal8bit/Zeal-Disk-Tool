@@ -1,0 +1,105 @@
+name: Build and test
+on:
+  push:
+    branches: [main, 'feature/**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            platform: linux/amd64
+            image: ubuntu:22.04
+          - arch: armv7
+            platform: linux/arm/v7
+            image: debian:bookworm
+          - arch: aarch64
+            platform: linux/arm64
+            image: debian:bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm,arm64
+      - name: Build GUI, CLI and tests on the target Linux ABI
+        run: >-
+          docker run --rm --platform '${{ matrix.platform }}'
+          -v "$PWD:/src" -w /src '${{ matrix.image }}'
+          sh scripts/ci-linux.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zdt-linux-${{ matrix.arch }}
+          path: build/release/*.tar.gz
+          if-no-files-found: error
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Raylib 5.5
+        run: |
+          mkdir -p build/deps
+          curl -fL https://github.com/raysan5/raylib/archive/refs/tags/5.5.tar.gz -o build/deps/raylib.tar.gz
+          tar -xzf build/deps/raylib.tar.gz -C build/deps
+          cmake -S build/deps/raylib-5.5 -B build/deps/raylib-build -DBUILD_EXAMPLES=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/build/deps/raylib-install"
+          cmake --build build/deps/raylib-build --parallel 3
+          cmake --install build/deps/raylib-build
+      - name: Build, test and package
+        run: |
+          cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Release -DRAYLIB_INCLUDE_DIR="$PWD/build/deps/raylib-install/include" -DRAYLIB_LIBRARY="$PWD/build/deps/raylib-install/lib/libraylib.a"
+          cmake --build build/release --parallel 3
+          ctest --test-dir build/release --output-on-failure
+          cmake --build build/release --target package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zdt-macos-${{ matrix.arch }}
+          path: build/release/*.tar.gz
+          if-no-files-found: error
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git curl tar
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-python
+      - name: Build, test and package native Windows binaries
+        shell: msys2 {0}
+        run: |
+          mkdir -p build/deps
+          curl -fL https://github.com/raysan5/raylib/archive/refs/tags/5.5.tar.gz -o build/deps/raylib.tar.gz
+          tar -xzf build/deps/raylib.tar.gz -C build/deps
+          cmake -S build/deps/raylib-5.5 -B build/deps/raylib-build -G Ninja -DBUILD_EXAMPLES=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/build/deps/raylib-install"
+          cmake --build build/deps/raylib-build --parallel 3
+          cmake --install build/deps/raylib-build
+          cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DRAYLIB_INCLUDE_DIR="$PWD/build/deps/raylib-install/include" -DRAYLIB_LIBRARY="$PWD/build/deps/raylib-install/lib/libraylib.a"
+          cmake --build build/release --parallel 3
+          ctest --test-dir build/release --output-on-failure
+          cmake --build build/release --target package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zdt-windows-x86_64
+          path: build/release/*.zip
+          if-no-files-found: error

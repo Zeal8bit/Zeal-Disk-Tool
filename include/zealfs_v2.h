@@ -6,6 +6,7 @@
 #pragma once
 
 #include <stdio.h>
+#include <sys/types.h>
 #include <stdint.h>
 #include <inttypes.h>
 #include <assert.h>
@@ -113,7 +114,7 @@ typedef struct zealfs_context_t {
  * @brief Helper to get the recommended page size from a disk size.
  *
  */
-static inline int zealfsv2_page_size(long long part_size)
+static inline int zealfsv2_page_size(uint64_t part_size)
 {
     if (part_size <= 64*KB) {
         return 256;
@@ -170,16 +171,15 @@ static inline int zealfsv2_format(uint8_t* partition, uint64_t size) {
         /* It's always the last page that has the reserved pages, generate the bitmap */
         uint32_t bitmap = 0xFF << last_valid_pages_count;
         header->pages_bitmap[header->bitmap_size - 1] = (uint8_t) (bitmap & 0xff);
-        printf("Last bitmap byte is: %x\n", (bitmap & 0xff));
+
     }
 
-    printf("[ZEALFS] Partition size: %" PRIu64 " bytes\n", size);
-    printf("[ZEALFS] Bitmap size: %d bytes\n", header->bitmap_size);
-    printf("[ZEALFS] Pages size: %d bytes (code %d)\n", page_size_bytes, ((page_size_bytes >> 8) - 1));
+
+
 #if 0
-    printf("[ZEALFS] Maximum root entries: %d\n", get_root_dir_max_entries(header));
-    printf("[ZEALFS] Maximum dir entries: %d\n", get_dir_max_entries(header));
-    printf("[ZEALFS] Header size/Root entries: %d (0x%x)\n", get_fs_header_size(header), get_fs_header_size(header));
+
+
+
 #endif
 
     return 0;
@@ -241,7 +241,7 @@ int zealfs_open(const char * path, zealfs_context_t* ctx, zealfs_fd_t* fd);
  * @param offset The offset in the file from which to start reading.
  * @return The number of bytes read on success, or a negative error code on failure.
  */
-int zealfs_read(zealfs_context_t* ctx, zealfs_fd_t* fd, void *buf, size_t size, off_t offset);
+int zealfs_read(zealfs_context_t* ctx, zealfs_fd_t* fd, void *buf, size_t size, int64_t offset);
 
 
 /**
@@ -312,7 +312,7 @@ int zealfs_rmdir(const char* path, zealfs_context_t* ctx);
  *
  * @return The amount of free space in bytes.
  */
-uint32_t zealfs_free_space(zealfs_context_t* ctx);
+uint64_t zealfs_free_space(zealfs_context_t* ctx);
 
 
 /**
@@ -325,7 +325,7 @@ uint32_t zealfs_free_space(zealfs_context_t* ctx);
  *
  * @return The size of the partition in bytes.
  */
-uint32_t zealfs_total_space(zealfs_context_t* ctx);
+uint64_t zealfs_total_space(zealfs_context_t* ctx);
 
 
 /**
@@ -340,7 +340,7 @@ uint32_t zealfs_total_space(zealfs_context_t* ctx);
  * @return 0 on success, or a negative error code on failure.
  */
 int zealfs_write(zealfs_context_t* ctx, zealfs_fd_t* fd,
-                void *buf, size_t size, off_t offset);
+                void *buf, size_t size, int64_t offset);
 
 
 /**

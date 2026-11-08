@@ -220,7 +220,7 @@ static void ui_draw_disk(struct nk_context *ctx, const disk_info_t *disk, int* s
         nk_selectable_label(ctx, disk_get_fs_type(part->type), NK_TEXT_LEFT, &select);
 
         /* Partition start address */
-        sprintf(buffer, "0x%08lx", part->start_lba * DISK_SECTOR_SIZE);
+        snprintf(buffer, sizeof(buffer), "0x%08" PRIx64, (uint64_t)part->start_lba * DISK_SECTOR_SIZE);
         nk_selectable_label(ctx, buffer, NK_TEXT_LEFT, &select);
 
         /* Partition size */
@@ -261,7 +261,7 @@ static void ui_mbr_handle(struct nk_context *ctx, disk_info_t* disk)
                 if (nk_button_label(ctx, "Yes")) {
                     int success = disk_create_mbr(disk);
                     if (success) {
-                        ui_statusbar_printf("MBR created successfully!\n");
+                        ui_statusbar_printf("MBR creation staged. Use Apply to save.\n");
                     } else {
                         ui_statusbar_printf("Error creating the MBR\n");
                     }
@@ -292,6 +292,7 @@ static void ui_apply_handle(struct nk_context *ctx, disk_info_t* disk)
                     .title = "Apply changes",
                     .msg = "Success!"
                 };
+                result_info.msg = "Success!";
                 const char* error_str = disk_write_changes(disk);
                 if (error_str) {
                     result_info.msg = error_str;
@@ -320,6 +321,7 @@ static void ui_cancel_handle(struct nk_context *ctx, disk_info_t* disk)
             nk_label_wrap(ctx, "Discard all changes? All unsaved changes will be lost.");
             nk_layout_row_dynamic(ctx, 30, 2);
             if (nk_button_label(ctx, "Yes")) {
+                ui_partition_viewer_clear(ctx);
                 disk_revert_changes(disk);
                 popup_close(POPUP_CANCEL);
             } else if (nk_button_label(ctx, "No")) {
@@ -476,7 +478,7 @@ static void ui_new_partition(struct nk_context *ctx, disk_info_t* disk)
         nk_label(ctx, "", NK_TEXT_CENTERED);
         nk_label(ctx, "", NK_TEXT_CENTERED);
 
-        if (nk_button_label(ctx, "Create") && selected_size_kb > min_size_kb) {
+        if (nk_button_label(ctx, "Create") && selected_size_kb >= min_size_kb) {
             const uint64_t sectors_count = (selected_size_kb * KB) / DISK_SECTOR_SIZE;
             /* The user clicked on `Create`, allocate a new ZealFS partition */
             assert(largest_free_addr % DISK_SECTOR_SIZE == 0);
@@ -515,7 +517,7 @@ static void ui_new_image(struct nk_context *ctx, disk_list_state_t* state)
         /* Input field for the image name */
         nk_label(ctx, "Location:", NK_TEXT_CENTERED);
         /* Button to browse for a file using tinyfiledialogs */
-        nk_edit_string(ctx, NK_EDIT_FIELD, image_path, &image_len, sizeof(image_path), nk_filter_default);
+        nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, image_path, sizeof(image_path), nk_filter_default);
         if (nk_button_label(ctx, "Browse...")) {
             const char* filter_patterns[] = { "*.img" };
             const char* selected_file = tinyfd_saveFileDialog("Select Disk Image", image_path, 1, filter_patterns, NULL);
@@ -634,6 +636,21 @@ static void print_usage(const char* prog)
 }
 
 
+static bool ui_can_quit(void)
+{
+    disk_list_state_t *state = disk_get_state();
+    for (int i = 0; i < state->disk_count; ++i) {
+        disk_info_t *disk = &state->disks[i];
+        if (!disk->has_staged_changes) continue;
+        char message[1024];
+        snprintf(message, sizeof(message), "Pending changes on %.800s. Apply before quitting?\nYes: apply. No: discard. Cancel: keep editing.", disk->name);
+        int answer = tinyfd_messageBox("Unsaved changes", message, "yesnocancel", "question", 0);
+        if (!answer) return false;
+        if (answer == 1 && disk_write_changes(disk)) return false;
+    }
+    return true;
+}
+
 int main(int argc, char* argv[]) {
     /* Parse flags before initializing anything */
     for (int i = 1; i < argc; i++) {
@@ -697,7 +714,8 @@ int main(int argc, char* argv[]) {
 
     ui_statusbar_print("Ready!");
 
-    while (!WindowShouldClose()) {
+    while (true) {
+        if (WindowShouldClose() && ui_can_quit()) break;
         UpdateNuklear(ctx);
 
         /* If any popup is opened, the main window must not be focusable */
@@ -798,14 +816,15 @@ int main(int argc, char* argv[]) {
             .w = winWidth - disk_view_rect.w,
             .h = disk_view_rect.h,
         };
-        if (current_disk != NULL && !current_disk->has_staged_changes) {
+        current_disk = disk_get_current(state);
+        if (current_disk != NULL) {
             ui_partition_viewer(ctx, current_disk, state->selected_partition, viewer_bounds);
         } else {
             ui_partition_viewer(ctx, current_disk, -1, viewer_bounds);
         }
 
         /* Make the menubar always on top, returns non-zero if we must close the window */
-        if (ui_menubar_show(ctx, state, winWidth)) {
+        if (ui_menubar_show(ctx, state, winWidth) && ui_can_quit()) {
             break;
         }
 
@@ -818,6 +837,8 @@ int main(int argc, char* argv[]) {
         EndDrawing();
     }
 
+    ui_partition_viewer_clear(ctx);
+    disks_close();
     UnloadNuklear(ctx);
     CloseWindow();
     return 0;

@@ -15,6 +15,12 @@ function(generate_version_header out)
     # Use the same version string as the header file
     set(APP_VERSION "${GIT_VERSION}" PARENT_SCOPE)
 
+    if(GIT_VERSION MATCHES "^v?([0-9]+\\.[0-9]+\\.[0-9]+)")
+        set(APP_NUMERIC_VERSION "${CMAKE_MATCH_1}" PARENT_SCOPE)
+    else()
+        set(APP_NUMERIC_VERSION "0.0.0" PARENT_SCOPE)
+    endif()
+
     file(WRITE ${out} "#define VERSION \"${GIT_VERSION}\"\n")
     add_custom_target(version_header DEPENDS ${out})
 endfunction()
