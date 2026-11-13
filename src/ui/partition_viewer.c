@@ -86,6 +86,7 @@ static int read_directory(const char* path_ro)
     }
     char path[MAX_PATH_LENGTH + 1];
     snprintf(path, sizeof(path), "%s", path_ro);
+    /* Remove trailing `/` if path is not `/` */
     remove_trailing_slash(path);
     zfs_error error;
     zfs_entry* raw = NULL;
@@ -152,6 +153,9 @@ static void partition_viewer_clear(void)
     strcpy(m_part_ctx.address_bar, "/");
 }
 
+/**
+ * @brief Parse a newly opened partition
+ */
 static void partition_viewer_parse(disk_info_t* disk, partition_t* part)
 {
     partition_viewer_clear();
@@ -230,12 +234,15 @@ static void extract_selected_file(void)
         return;
     }
     zfs_entry* entry = &m_part_ctx.entries_raw[m_part_ctx.selected_file];
+    /* At the moment, only extarct files, not directories */
     if (entry->directory) {
         ui_statusbar_print("Only files can be extracted");
         return;
     }
+    /* Where to save the file */
     const char* destination = tinyfd_saveFileDialog("Export file", entry->name, 0, NULL, NULL);
     if (!destination) {
+        /* Abort since the dialog was closed */
         return;
     }
     char path[MAX_PATH_LENGTH];
@@ -254,6 +261,7 @@ static void extract_selected_file(void)
 
 static int import_file(const char* file_path)
 {
+    /* Check if the file name complies with the FS restrictions */
     const char* filename = disk_get_basename(file_path);
     if (strlen(filename) > ZFS_NAME_MAX) {
         filename = tinyfd_inputBox("Rename File", "Enter a name (max 16 bytes):", "");
@@ -261,6 +269,7 @@ static int import_file(const char* file_path)
     if (!filename || !*filename) {
         return 0;
     }
+    /* Filename is correct, generate the absolute path and create it! */
     char path[MAX_PATH_LENGTH];
     if (snprintf(path, sizeof(path), "%s%s", m_part_ctx.address_bar, filename) >= (int) sizeof(path)) {
         ui_statusbar_print("Path is too long");

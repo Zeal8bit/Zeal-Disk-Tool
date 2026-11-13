@@ -1,7 +1,8 @@
 /**
  * SPDX-FileCopyrightText: 2025 Zeal 8-bit Computer <contact@zeal8bit.com>
  *
- * SPDX-License-Identifier: Apache-2.0 */
+ * SPDX-License-Identifier: Apache-2.0
+ */
 /* GUI adapter. All disk and filesystem behavior lives in zealfs_core. */
 #include "disk.h"
 #include "ui/statusbar.h"
@@ -46,6 +47,7 @@ void disk_sync(disk_info_t* disk)
     disk->has_mbr = info->has_mbr;
     disk->has_staged_changes = info->pending;
     snprintf(disk->path, sizeof(disk->path), "%s", info->path);
+    /* Extract the filename out of the path */
     snprintf(disk->name, sizeof(disk->name), "%s", disk_get_basename(info->path));
     disk->free_part_idx = -1;
     for (int i = 0; i < 4; ++i) {
@@ -59,6 +61,8 @@ void disk_sync(disk_info_t* disk)
     }
     char size_str[32];
     disk_get_size_str(info->size, size_str, sizeof(size_str));
+    /* Label depends on the name, so it must be done after setting the name */
+    /* Keep the first character empty, it will be a `*` in case there is any pending change */
     snprintf(disk->label, sizeof(disk->label), "%c%.400s (%s)", info->pending ? '*' : ' ', disk->name, size_str);
     disk->revision = ++next_revision;
 }
@@ -71,12 +75,14 @@ static void report(disk_info_t* d, zfs_status s, const char* success)
 
 disk_err_t disks_refresh(void)
 {
+    /* Check if any disk has staged changes */
     for (int i = 0; i < s_state.disk_count; ++i) {
         if (s_state.disks[i].has_staged_changes) {
             ui_statusbar_print("Apply or cancel pending changes before refreshing");
             return ERR_INVALID;
         }
     }
+    /* Backup the loaded disk images */
     disk_info_t backup_images[MAX_DISKS];
     int backup_count = 0;
     for (int i = 0; i < s_state.disk_count; ++i) {
@@ -95,6 +101,7 @@ disk_err_t disks_refresh(void)
     if (!found) {
         return ERR_INVALID;
     }
+    /* Refresh the disk list */
     zfs_status err = zfs_discover(found, MAX_DISKS - backup_count, &count, &error);
     for (size_t i = 0; !err && i < count; ++i) {
         disk_info_t* disk = &s_state.disks[s_state.disk_count];
@@ -104,9 +111,11 @@ disk_err_t disks_refresh(void)
         }
     }
     free(found);
+    /* Restore the saved loaded images at the end of the disk array */
     for (int i = 0; i < backup_count; ++i) {
         s_state.disks[s_state.disk_count++] = backup_images[i];
     }
+    /* Check for a default disk */
     if (s_state.disk_count) {
         s_state.selected_disk = 0;
     }
@@ -165,6 +174,7 @@ void disk_revert_changes(disk_info_t* disk)
         ui_statusbar_print("New image discarded");
         return;
     }
+    /* Cancel all the changes made to the disk */
     report(disk, zfs_discard(disk ? disk->handle : NULL, &error), "Changes discarded");
 }
 
@@ -190,6 +200,7 @@ uint64_t disk_max_partition_size(disk_info_t* disk, uint32_t align, uint64_t* la
 
 int disk_open_image_file_path(disk_list_state_t* state, const char* file_path)
 {
+    /* Check if the image is already opened */
     for (int i = 0; i < state->disk_count; ++i) {
         if (!strcmp(state->disks[i].path, file_path)) {
             return i;

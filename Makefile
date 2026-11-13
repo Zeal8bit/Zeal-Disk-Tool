@@ -17,7 +17,13 @@ install: all
 cli:
 	cmake -S . -B build/cli -DZEALFS_BUILD_GUI=OFF $(CMAKE_FLAGS)
 	cmake --build build/cli
+##########################
+#       Shortcuts        #
+##########################
 linux macosx: all
+############################
+# Build the Windows binary #
+############################
 windows:
 	cmake -S . -B build/win64 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-win64.cmake $(CMAKE_FLAGS)
 	cmake --build build/win64

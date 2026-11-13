@@ -1,7 +1,8 @@
 /**
  * SPDX-FileCopyrightText: 2025 Zeal 8-bit Computer <contact@zeal8bit.com>
  *
- * SPDX-License-Identifier: Apache-2.0 */
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #include "internal.h"
 #include <string.h>
 
@@ -20,6 +21,7 @@ zfs_status zfs_native_open(const char* path, bool writing, zfs_native* fd, uint6
     if (*fd == INVALID_HANDLE_VALUE) {
         return win_error(e, "Open device");
     }
+    /* Get the size of the disk, make sure it is not bigger than expected */
     GET_LENGTH_INFORMATION length;
     DISK_GEOMETRY geometry;
     DWORD n;

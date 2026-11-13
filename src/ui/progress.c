@@ -1,10 +1,12 @@
 /**
  * SPDX-FileCopyrightText: 2025 Zeal 8-bit Computer <contact@zeal8bit.com>
  *
- * SPDX-License-Identifier: Apache-2.0 */
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #include "disk.h"
 #ifdef _WIN32
 #include <windows.h>
+// for Progress Bar
 #include <commctrl.h>
 static HWND hwndProgress = NULL;
 static HWND hwndWindow = NULL;

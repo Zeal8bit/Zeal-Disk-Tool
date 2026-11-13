@@ -60,6 +60,7 @@ static inline int get_page_size(const zealfs_header_t* header)
 
 static inline int check_header(zealfs_context_t* ctx) {
     zealfs_header_t* header = (zealfs_header_t*) ctx->header;
+    /* Initialize the header if it is not initialized yet */
     if (ctx->header_size) {
         return 0;
     }
@@ -73,6 +74,8 @@ static inline int check_header(zealfs_context_t* ctx) {
     size_t header_size = get_fs_header_size(header);
     size_t page_size = get_page_size(header);
     size_t pages = (size_t) header->bitmap_size * 8;
+    /* Read the FAT table, that starts at the first page of the disk, its size is one page (when 256 bytes)
+     * else, two pages */
     size_t fat_size = page_size == 256 ? page_size : 2 * page_size;
     if (header_size > page_size || pages > (page_size == 256 ? fat_size : fat_size / 2) || header->free_pages > pages) {
         return -EIO;
@@ -1020,6 +1023,7 @@ int zealfs_readdir(zealfs_context_t* ctx, zealfs_fd_t* fd, zealfs_entry_t* ret_e
     int max_entries = is_root ? get_root_dir_max_entries(header) :
                                 get_dir_max_entries(header);
     int filled_count = 0;
+    /* Get the page of the current directory */
     uint16_t current_page = fd->entry_addr / get_page_size(header);
     uint32_t current_addr = fd->entry_addr;
 
@@ -1038,6 +1042,7 @@ int zealfs_readdir(zealfs_context_t* ctx, zealfs_fd_t* fd, zealfs_entry_t* ret_e
         for (int i = 0; i < max_entries; i++) {
             const uint8_t flags = entries[i].flags;
             if (flags & IS_OCCUPIED) {
+                /* Check if we have filled the requested count */
                 if (filled_count >= count) {
                     return -ENOBUFS;
                 }

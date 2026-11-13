@@ -20,6 +20,7 @@ zfs_status zfs_native_open(const char* path, bool write_access, zfs_native* fd, 
         return zfs_error_set(e, errno == EACCES || errno == EPERM ? ZFS_PERMISSION : ZFS_IO,
                              "Cannot open device %s: %s", path, strerror(errno));
     }
+    /* Get the size of the disk, make sure it is not bigger than expected */
     struct stat st;
     unsigned block = 0;
     bool ok = fstat(*fd, &st) == 0;

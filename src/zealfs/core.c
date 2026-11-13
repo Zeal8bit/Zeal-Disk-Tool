@@ -135,23 +135,29 @@ static zfs_status bytes_io(zfs_disk* d, uint64_t address, void* buffer, size_t s
     unsigned char sector[SECTOR];
     unsigned char* p = buffer;
     while (size) {
+        /* Check if address is aligned to SECTOR */
         size_t offset = (size_t) (address % SECTOR), n = SECTOR - offset;
         if (n > size) {
             n = size;
         }
+        /* Read the sector from the disk */
         zfs_status s = read_sector(d, address / SECTOR, sector, e);
         if (s) {
             return s;
         }
         if (writing) {
+            // Update the buffer with the new data
             memcpy(sector + offset, p, n);
+            /* Write it back */
             s = write_sector(d, address / SECTOR, sector, e);
             if (s) {
                 return s;
             }
         } else {
+            /* Copy the relevant part of the sector to the buffer */
             memcpy(p, sector + offset, n);
         }
+        /* Update the buffer, address, and size */
         address += n;
         p += n;
         size -= n;
@@ -220,6 +226,7 @@ static void put32(unsigned char* p, uint32_t v)
 static zfs_status parse(zfs_disk* d, zfs_error* e)
 {
     unsigned char sector[SECTOR];
+    /* Read MBR */
     zfs_status s = read_sector(d, 0, sector, e);
     if (s) {
         return s;
@@ -239,6 +246,7 @@ static zfs_status parse(zfs_disk* d, zfs_error* e)
         const unsigned char* p = sector + 446 + i * 16;
         zfs_partition* part = &d->info.partitions[i];
         *part = (zfs_partition){(p[0] & 0x80) || p[4] || le32(p + 8) || le32(p + 12), p[4], le32(p + 8), le32(p + 12)};
+        /* Be very conservative to make sure nothing is erased! */
         if (part->active && (!part->sectors || !part->start_lba ||
                              (uint64_t) part->start_lba + part->sectors > d->info.size / SECTOR)) {
             return zfs_error_set(e, ZFS_CORRUPT, "Partition %u lies outside the disk", i + 1);
@@ -632,6 +640,7 @@ zfs_status zfs_apply(zfs_disk* d, zfs_error* e)
         zfs_native fd = held ? d->device : ZFS_NATIVE_INVALID;
         uint64_t size = d->info.size;
         if (!held) {
+            /* Reopen the disk to write it back */
             s = zfs_native_open(d->info.path, true, &fd, &size, e);
         }
         if (s) {
@@ -679,6 +688,7 @@ zfs_status zfs_apply(zfs_disk* d, zfs_error* e)
                                  "before restoring from the retained backup");
         }
     }
+    /* Apply the changes in RAM too */
     d->info.pending = d->info.new_image = false;
     d->original = d->info;
     memset(d->dirty, 0, d->bitmap_size);
@@ -704,9 +714,13 @@ static zfs_status mbr_write(zfs_disk* d, zfs_error* e)
         zfs_partition* part = &d->info.partitions[i];
         memset(p, 0, 16);
         if (part->active) {
+            /* CHS fields not used */
             p[1] = p[2] = p[3] = p[5] = p[6] = p[7] = 0xff;
+            /* Partition type */
             p[4] = part->type;
+            /* Start LBA */
             put32(p + 8, part->start_lba);
+            /* Size in sectors */
             put32(p + 12, part->sectors);
         }
     }
@@ -727,11 +741,13 @@ zfs_status zfs_mbr_create(zfs_disk* d, zfs_error* e)
     if (s) {
         return s;
     }
+    /* Reset the MBR and set the signature only */
     unsigned char sector[SECTOR] = {0};
     sector[510] = 0x55;
     sector[511] = 0xaa;
     s = write_sector(d, 0, sector, e);
     s = finish(d, s, e);
+    /* Create a mirror for the RAM changes */
     if (!s) {
         d->info.has_mbr = true;
     }
@@ -743,7 +759,9 @@ zfs_status zfs_partition_space(zfs_disk* d, uint32_t alignment, uint64_t* start,
     if (!d || !start || !size || alignment < SECTOR || (alignment & (alignment - 1))) {
         return zfs_error_set(e, ZFS_INVALID, "Alignment must be a power of two, at least 512 bytes");
     }
+    /* Make sure the first sector is taken (MBR), so start checking at sector 1 when an MBR is present */
     uint64_t cursor = d->info.has_mbr ? SECTOR : 0, best = 0, best_start = 0;
+    /* Build a sorted list of active partitions */
     zfs_partition parts[4];
     int n = 0;
     for (int i = 0; i < 4; ++i) {
@@ -760,8 +778,11 @@ zfs_status zfs_partition_space(zfs_disk* d, uint32_t alignment, uint64_t* start,
         }
         parts[j] = p;
     }
+    /* Check all the gaps between the sections and keep the maximum in `best`.
+     * Check for free space after the last partition until the end of the disk too. */
     for (int i = 0; i <= n; ++i) {
         uint64_t end = i < n ? (uint64_t) parts[i].start_lba * SECTOR : d->info.size;
+        /* Try to align the address on the given alignment */
         uint64_t aligned = (cursor + alignment - 1) & ~((uint64_t) alignment - 1);
         if (end > aligned && end - aligned > best) {
             best = end - aligned;
@@ -785,6 +806,10 @@ static zfs_status format(zfs_disk* d, zfs_partition part, zfs_error* e)
     if (size < 8192 || size > MAX_PART_SIZE) {
         return zfs_error_set(e, ZFS_INVALID, "ZealFS v2 partitions must be between 8 KiB and 4 GiB");
     }
+    /* Format the partition with data. We need to allocate 3 pages at all time:
+     * - One for the header
+     * - Two for the FAT
+     */
     size_t bytes = (size_t) zealfsv2_page_size((long long) size) * 3;
     unsigned char* data = calloc(1, bytes);
     if (!data) {
@@ -804,7 +829,9 @@ zfs_status zfs_partition_create(zfs_disk* d, uint64_t size, uint32_t alignment, 
         return s;
     }
     int slot = -1;
+    /* No MBR, only allow the first partition to be used */
     for (int i = 0; i < (d->info.has_mbr ? 4 : 1); ++i) {
+        /* Find free partition */
         if (!d->info.partitions[i].active) {
             slot = i;
             break;
@@ -827,6 +854,7 @@ zfs_status zfs_partition_create(zfs_disk* d, uint64_t size, uint32_t alignment, 
     d->info.partitions[slot] = (zfs_partition){true, 0x5a, (uint32_t) (start / SECTOR), (uint32_t) (size / SECTOR)};
     s = format(d, d->info.partitions[slot], e);
     if (!s && d->info.has_mbr) {
+        /* Encode the partition in the staged MBR */
         s = mbr_write(d, e);
     }
     s = finish(d, s, e);
@@ -938,11 +966,13 @@ static zfs_status fs_open(zfs_disk* d, int partition, filesystem** out, zfs_erro
     if (!f) {
         return zfs_error_set(e, ZFS_NO_MEMORY, "Cannot allocate filesystem context");
     }
+    /* We have to create a context/arg for zealfs functions */
     f->disk = d;
     f->part = d->info.partitions[partition];
     f->fs.read = fs_read;
     f->fs.write = fs_write;
     f->fs.arg = f;
+    /* Browse the root directory */
     zealfs_fd_t root;
     int r = zealfs_opendir("/", &f->fs, &root);
     if (r < 0) {
@@ -1099,6 +1129,8 @@ zfs_status zfs_usage(zfs_disk* d, int part, uint64_t* free_bytes, uint64_t* tota
             return s;
         }
         d->free_cache[part] = zealfs_free_space(&f->fs);
+        /* If the partition starts at 0, it means that the disk has no MBR, instead of taking the
+         * whole disk as the partition size, use the number of bytes in the bitmap */
         d->total_cache[part] =
             f->part.start_lba == 0 ? zealfs_total_space(&f->fs) : (uint64_t) f->part.sectors * SECTOR;
         free(f);
@@ -1210,6 +1242,7 @@ static zfs_status create_file(zfs_disk* d, int part, const char* path, FILE* sou
         progress(d, offset, size);
     }
     if (!s) {
+        /* Flush the changes on the disk */
         s = fs_error(zealfs_flush(&f->fs, &fd), e);
     }
     s = finish(d, s, e);
@@ -1234,6 +1267,7 @@ zfs_status zfs_import(zfs_disk* d, int part, const char* host, const char* path,
     if (!file) {
         return sys_error(e, "Cannot open import source");
     }
+    /* Get the size of the file by seeking to the end */
 #ifdef _WIN32
     int seek_result = _fseeki64(file, 0, SEEK_END);
 #else
@@ -1369,6 +1403,7 @@ zfs_status zfs_core_export_file(zfs_disk* d, int part, const char* path, const c
         }
     }
     char temporary[ZFS_PATH_MAX];
+    /* Create the destination file */
     FILE* dest = zfs_temp_sibling(host, temporary, sizeof(temporary));
     if (!dest) {
         free(f);
@@ -1376,6 +1411,7 @@ zfs_status zfs_core_export_file(zfs_disk* d, int part, const char* path, const c
     }
     uint64_t offset = 0;
     unsigned char buffer[65536];
+    /* Write the file chunk by chunk */
     while (!s && offset < fd.entry.size) {
         size_t n = fd.entry.size - offset < sizeof(buffer) ? (size_t) (fd.entry.size - offset) : sizeof(buffer);
         r = zealfs_read(&f->fs, &fd, buffer, n, (int64_t) offset);

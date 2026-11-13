@@ -1,4 +1,6 @@
 # Optional: install linuxdeploy matching the target architecture to build an AppImage.
+# Deploy targets (AppImage), only for Linux
+# Needs linuxdeploy binary in PATH
 add_custom_target(linux_appimage
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/appimage"
     COMMAND linuxdeploy --appdir "${CMAKE_BINARY_DIR}/appimage/AppDir"

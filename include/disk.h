@@ -1,7 +1,8 @@
 /**
  * SPDX-FileCopyrightText: 2025 Zeal 8-bit Computer <contact@zeal8bit.com>
  *
- * SPDX-License-Identifier: Apache-2.0 */
+ * SPDX-License-Identifier: Apache-2.0
+ */
 #ifndef DISK_H
 #define DISK_H
 /* GUI view models and adapters; public functional API is zealfs.h. */
@@ -22,8 +23,8 @@
 
 typedef enum {
     ERR_SUCCESS,
-    ERR_NOT_ADMIN,
-    ERR_NOT_ROOT,
+    ERR_NOT_ADMIN,  /* Windows   */
+    ERR_NOT_ROOT,   /* Linux/Mac */
     ERR_INVALID
 } disk_err_t;
 
@@ -36,7 +37,11 @@ typedef struct {
 typedef struct {
     char name[ZFS_PATH_MAX], path[ZFS_PATH_MAX], label[DISK_LABEL_LEN];
     uint64_t size_bytes;
-    bool valid, is_image, has_mbr, has_staged_changes;
+    bool valid, is_image;
+    /* Original MBR */
+    bool has_mbr;
+    /* Staged changes, to be applied */
+    bool has_staged_changes;
     partition_t partitions[4], staged_partitions[4];
     int free_part_idx;
     zfs_disk* handle;
@@ -44,9 +49,18 @@ typedef struct {
     uint32_t allocation_alignment;
 } disk_info_t;
 
+
+/**
+ * @brief Type for the disks list state
+ */
 typedef struct {
     disk_info_t disks[MAX_DISKS];
-    int disk_count, selected_disk, selected_partition, selected_new_part_opt;
+    int disk_count;
+    int selected_disk; /* Index of the selected disk */
+    int selected_partition;
+
+    /* View related */
+    int selected_new_part_opt;
 } disk_list_state_t;
 
 static inline disk_info_t* disk_get_current(disk_list_state_t* state)
@@ -78,6 +92,13 @@ static inline const char* disk_get_basename(const char* path)
     return last_slash ? last_slash + 1 : path;
 }
 
+
+/**
+ * ============================================================================
+ *                              PORTABLE CODE
+ * ============================================================================
+ */
+
 disk_list_state_t* disk_get_state(void);
 disk_err_t disks_refresh(void);
 void disks_close(void);
@@ -93,10 +114,65 @@ uint64_t disk_max_partition_size(disk_info_t* disk, uint32_t align, uint64_t* la
 const char* disk_get_fs_type(uint8_t fs_byte);
 void disk_get_size_str(uint64_t size, char* buffer, int buffer_size);
 const char* disk_write_changes(disk_info_t* disk);
+
+/**
+ * @brief Prompts the user to choose a disk image file to add to the disk list.
+ *
+ * This function allows the user to select a disk image file, which is then added
+ * to the provided disk list state. It returns the index of the newly added disk
+ * on success or a negative value if an error occurs.
+ *
+ * @param state A pointer to the disk list state where the disk image will be added.
+ * @return int The index of the newly added disk on success, or a negative value on error.
+ */
 int disk_open_image_file(disk_list_state_t* state);
+
+/**
+ * @brief Open a disk image file from a given path and add it to the disk list.
+ *
+ * Unlike disk_open_image_file, this function does not prompt the user with
+ * a file dialog. It directly opens the file at the given path.
+ *
+ * @param state A pointer to the disk list state where the disk image will be added.
+ * @param path  Path to the image file to open.
+ * @return int The index of the newly added disk on success, or a negative value on error.
+ */
 int disk_open_image_file_path(disk_list_state_t* state, const char* path);
 int disk_create_image(disk_list_state_t* state, const char* path, uint64_t size, bool init_mbr);
+
+/**
+ * ============================================================================
+ *                              OS SPECIFIC CODE
+ * ============================================================================
+ */
+
+/**
+ * OPTIONAL OS FEATURES
+ */
+
+/**
+ * @brief Initializes the progress bar for disk operations.
+ *
+ * This function sets up the progress bar to provide visual feedback
+ * to the user about the progress of a disk operation.
+ */
 void disk_init_progress_bar(void);
+
+/**
+ * @brief Updates the progress bar with the current progress.
+ *
+ * @param percent The current progress percentage (0 to 100).
+ * This function updates the progress bar to reflect the given
+ * percentage, providing real-time feedback to the user.
+ */
 void disk_update_progress_bar(int percent);
+
+/**
+ * @brief Destroys the progress bar after the operation is complete.
+ *
+ * This function cleans up any resources associated with the progress bar
+ * and removes it from the display once the disk operation is finished.
+ */
 void disk_destroy_progress_bar(void);
-#endif
+
+#endif // DISK_H

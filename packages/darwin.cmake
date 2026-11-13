@@ -1,10 +1,13 @@
+# Find required macOS tools
 find_program(SIPS_EXECUTABLE sips REQUIRED)
 find_program(ICONUTIL_EXECUTABLE iconutil REQUIRED)
 find_program(CODESIGN_EXECUTABLE codesign REQUIRED)
 set(MAC_BUNDLE "${CMAKE_BINARY_DIR}/ZealDiskTool.app")
 set(MAC_ICONSET "${CMAKE_BINARY_DIR}/zeal-disk-tool.iconset")
+# Configure Info.plist with version information
 configure_file(packages/macos/Info.plist.in "${CMAKE_BINARY_DIR}/Info.plist" @ONLY)
 set(ICON_COMMANDS)
+# Generate required icon sizes using sips
 foreach(SIZE 16 32 128 256 512)
     math(EXPR DOUBLE_SIZE "${SIZE} * 2")
     list(APPEND ICON_COMMANDS COMMAND "${SIPS_EXECUTABLE}" -z ${SIZE} ${SIZE}
@@ -13,12 +16,17 @@ foreach(SIZE 16 32 128 256 512)
         "${CMAKE_SOURCE_DIR}/packages/icons/zeal-disk-tool.png" --out "${MAC_ICONSET}/icon_${SIZE}x${SIZE}@2x.png")
 endforeach()
 get_filename_component(RAYLIB_DEPENDENCY_DIR "${RAYLIB_LIBRARY}" DIRECTORY)
+# Create macOS .app bundle
 add_custom_target(mac_app
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${MAC_BUNDLE}"
+    # Create iconset directory
     COMMAND ${CMAKE_COMMAND} -E make_directory "${MAC_ICONSET}"
     ${ICON_COMMANDS}
+    # Convert iconset to icns
     COMMAND "${ICONUTIL_EXECUTABLE}" -c icns "${MAC_ICONSET}" -o "${CMAKE_BINARY_DIR}/zeal-disk-tool.icns"
+    # Create .app bundle directories
     COMMAND ${CMAKE_COMMAND} -E make_directory "${MAC_BUNDLE}/Contents/MacOS" "${MAC_BUNDLE}/Contents/Resources"
+    # Copy files into .app bundle
     COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:zeal_disk_tool>" "${MAC_BUNDLE}/Contents/MacOS/"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_BINARY_DIR}/Info.plist" "${MAC_BUNDLE}/Contents/"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_BINARY_DIR}/zeal-disk-tool.icns" "${MAC_BUNDLE}/Contents/Resources/"
@@ -32,4 +40,5 @@ install(CODE "execute_process(COMMAND \"${CMAKE_COMMAND}\" --build \"${CMAKE_BIN
     if(NOT result EQUAL 0)
         message(FATAL_ERROR \"macOS packaging failed\")
     endif()")
+# Configure standard install target to install .app bundle
 install(DIRECTORY "${MAC_BUNDLE}" DESTINATION Applications USE_SOURCE_PERMISSIONS)

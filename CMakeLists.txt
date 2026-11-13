@@ -23,6 +23,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 else()
     message(FATAL_ERROR "Supported platforms: macOS, Linux, Windows")
 endif()
+# List the source files that are common to all OS
 add_library(zealfs_core STATIC src/zealfs/export.c src/zealfs/transfer.c src/zealfs/core.c src/zealfs/host.c src/zealfs/zealfs_v2.c ${NATIVE_SOURCES})
 target_include_directories(zealfs_core PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>" "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 if(NOT WIN32)
@@ -37,6 +38,7 @@ install(FILES README.md LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
 install(DIRECTORY docs md_imgs DESTINATION ${CMAKE_INSTALL_DOCDIR})
 
 if(ZEALFS_BUILD_GUI)
+    # Check for Raylib path, either from the system path or from the toolchain file
     if(NOT RAYLIB_INCLUDE_DIR)
         find_path(RAYLIB_INCLUDE_DIR raylib.h REQUIRED)
     endif()
@@ -46,25 +48,31 @@ if(ZEALFS_BUILD_GUI)
         message(FATAL_ERROR "The unchanged GUI renderer requires Raylib 5.5. Set RAYLIB_INCLUDE_DIR and RAYLIB_LIBRARY to that version; core/CLI builds do not need Raylib.")
     endif()
     find_library(RAYLIB_LIBRARY NAMES raylib HINTS ${RAYLIB_LIBRARY_DIR} REQUIRED)
+    # Create the executable and give it all the sources gathered
     add_executable(zeal_disk_tool src/ui/main.c src/ui/disk.c src/ui/popup.c src/ui/combo_disk.c
         src/ui/message_box.c src/ui/menubar.c src/ui/statusbar.c src/ui/partition_viewer.c
         src/ui/tinyfiledialogs.c src/ui/progress.c src/ui/raylib-nuklear.c)
     target_include_directories(zeal_disk_tool PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated" include ${RAYLIB_INCLUDE_DIR})
+    # Libraries to link to DiskTool regardless of the OS we are building for
     target_link_libraries(zeal_disk_tool PRIVATE zealfs_core ${RAYLIB_LIBRARY})
     if(UNIX)
         target_link_libraries(zeal_disk_tool PRIVATE m)
     endif()
+    # Include platform-specific options
     if(APPLE)
         target_link_libraries(zeal_disk_tool PRIVATE "-framework Cocoa" "-framework IOKit" "-framework OpenGL")
         include(packages/darwin.cmake)
         add_custom_target(gui_package DEPENDS mac_app)
     elseif(WIN32)
+        # Windows icon .res
         enable_language(RC)
         target_sources(zeal_disk_tool PRIVATE packages/appdir/zeal-disk-tool.rc)
         target_include_directories(zeal_disk_tool PRIVATE packages/icons packages/appdir)
+        # For Windows, we need to link a bit more libraries
         target_link_libraries(zeal_disk_tool PRIVATE winmm gdi32 ole32 comctl32 shell32 uuid)
         set_target_properties(zeal_disk_tool PROPERTIES WIN32_EXECUTABLE TRUE)
         if(MINGW)
+            # Make the Windows target static, as such, no need for any .dll file
             target_link_options(zeal_disk_tool PRIVATE -static)
         endif()
         install(TARGETS zeal_disk_tool RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
@@ -74,6 +82,7 @@ if(ZEALFS_BUILD_GUI)
         target_link_libraries(zeal_disk_tool PRIVATE pthread dl OpenGL::GL ${X11_LIBRARIES})
         include(packages/appimage.cmake)
         add_custom_target(gui_package DEPENDS linux_appimage)
+        # General install target for Linux
         install(TARGETS zeal_disk_tool RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     endif()
 endif()
