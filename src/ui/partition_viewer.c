@@ -89,13 +89,13 @@ static int read_directory(const char* path_ro)
     remove_trailing_slash(path);
     zfs_error error;
     zfs_entry* raw = NULL;
-    size_t count = 0;
+    size_t filled_entries = 0;
     int index = (int) (m_part_ctx.partition - m_part_ctx.disk->partitions);
-    if (zfs_list(m_part_ctx.disk->handle, index, path, &raw, &count, &error)) {
+    if (zfs_list(m_part_ctx.disk->handle, index, path, &raw, &filled_entries, &error)) {
         ui_statusbar_print(error.message);
         return -1;
     }
-    partition_entry_t* entries = calloc(count ? count : 1, sizeof(*entries));
+    partition_entry_t* entries = calloc(filled_entries ? filled_entries : 1, sizeof(*entries));
     if (!entries) {
         zfs_entries_free(raw);
         ui_statusbar_print("Not enough memory to display directory");
@@ -105,18 +105,18 @@ static int read_directory(const char* path_ro)
     zfs_entries_free(m_part_ctx.entries_raw);
     m_part_ctx.entries = entries;
     m_part_ctx.entries_raw = raw;
-    m_part_ctx.entries_count = (int) count;
-    if (m_part_ctx.selected_file >= (int) count) {
+    m_part_ctx.entries_count = (int) filled_entries;
+    if (m_part_ctx.selected_file >= (int) filled_entries) {
         m_part_ctx.selected_file = 0;
     }
-    for (size_t i = 0; i < count; ++i) {
+    for (size_t i = 0; i < filled_entries; ++i) {
         snprintf(entries[i].name, sizeof(entries[i].name), "%s%s", raw[i].name, raw[i].directory ? "/" : "");
         snprintf(entries[i].size, sizeof(entries[i].size), "%u", raw[i].size);
         snprintf(entries[i].type, sizeof(entries[i].type), "%s", raw[i].directory ? "Directory" : "File");
-        char date[64];
-        snprintf(date, sizeof(date), "%04u-%02u-%02u %02u:%02u:%02u", raw[i].year, raw[i].month, raw[i].day,
-                 raw[i].hour, raw[i].minute, raw[i].second);
-        memcpy(entries[i].date, date, ENTRY_DATE_LEN);
+        char tmp[64];
+        snprintf(tmp, sizeof(tmp), "%04u-%02u-%02u %02u:%02u:%02u", raw[i].year, raw[i].month, raw[i].day, raw[i].hour,
+                 raw[i].minute, raw[i].second);
+        memcpy(entries[i].date, tmp, ENTRY_DATE_LEN);
     }
     return 0;
 }
@@ -189,18 +189,18 @@ static void change_directory(const char* directory)
 
 static void create_directory(void)
 {
-    const char* name = tinyfd_inputBox("New Folder", "Enter folder name (max 16 bytes):", "");
-    if (!name) {
+    const char* folder_name = tinyfd_inputBox("New Folder", "Enter folder name (max 16 bytes):", "");
+    if (!folder_name) {
         return;
     }
     char path[MAX_PATH_LENGTH];
-    if (snprintf(path, sizeof(path), "%s%s", m_part_ctx.address_bar, name) >= (int) sizeof(path)) {
+    if (snprintf(path, sizeof(path), "%s%s", m_part_ctx.address_bar, folder_name) >= (int) sizeof(path)) {
         ui_statusbar_print("Path is too long");
         return;
     }
     zfs_error error;
-    zfs_status status = zfs_mkdir(m_part_ctx.disk->handle, current_partition(), path, &error);
-    mutation_result(status, &error, "Folder creation staged");
+    zfs_status ret = zfs_mkdir(m_part_ctx.disk->handle, current_partition(), path, &error);
+    mutation_result(ret, &error, "Folder creation staged");
 }
 
 static void delete_entry(void)
@@ -215,8 +215,8 @@ static void delete_entry(void)
         return;
     }
     zfs_error error;
-    zfs_status status = zfs_remove(m_part_ctx.disk->handle, current_partition(), path, entry->directory, &error);
-    mutation_result(status, &error, "Deletion staged");
+    zfs_status ret = zfs_remove(m_part_ctx.disk->handle, current_partition(), path, entry->directory, &error);
+    mutation_result(ret, &error, "Deletion staged");
 }
 
 static void gui_progress(void* user, uint64_t done, uint64_t total)
@@ -246,34 +246,34 @@ static void extract_selected_file(void)
     zfs_error error;
     disk_init_progress_bar();
     zfs_set_callbacks(m_part_ctx.disk->handle, (zfs_callbacks){.progress = gui_progress});
-    zfs_status status = zfs_export(m_part_ctx.disk->handle, current_partition(), path, destination, true, &error);
+    zfs_status ret = zfs_export(m_part_ctx.disk->handle, current_partition(), path, destination, true, &error);
     zfs_set_callbacks(m_part_ctx.disk->handle, (zfs_callbacks){0});
     disk_destroy_progress_bar();
-    ui_statusbar_print(status ? error.message : "File exported");
+    ui_statusbar_print(ret ? error.message : "File exported");
 }
 
-static int import_file(const char* host_path)
+static int import_file(const char* file_path)
 {
-    const char* name = disk_get_basename(host_path);
-    if (strlen(name) > ZFS_NAME_MAX) {
-        name = tinyfd_inputBox("Rename File", "Enter a name (max 16 bytes):", "");
+    const char* filename = disk_get_basename(file_path);
+    if (strlen(filename) > ZFS_NAME_MAX) {
+        filename = tinyfd_inputBox("Rename File", "Enter a name (max 16 bytes):", "");
     }
-    if (!name || !*name) {
+    if (!filename || !*filename) {
         return 0;
     }
     char path[MAX_PATH_LENGTH];
-    if (snprintf(path, sizeof(path), "%s%s", m_part_ctx.address_bar, name) >= (int) sizeof(path)) {
+    if (snprintf(path, sizeof(path), "%s%s", m_part_ctx.address_bar, filename) >= (int) sizeof(path)) {
         ui_statusbar_print("Path is too long");
         return 0;
     }
     zfs_error error;
     disk_init_progress_bar();
     zfs_set_callbacks(m_part_ctx.disk->handle, (zfs_callbacks){.progress = gui_progress});
-    zfs_status status = zfs_import(m_part_ctx.disk->handle, current_partition(), host_path, path, &error);
+    zfs_status ret = zfs_import(m_part_ctx.disk->handle, current_partition(), file_path, path, &error);
     zfs_set_callbacks(m_part_ctx.disk->handle, (zfs_callbacks){0});
     disk_destroy_progress_bar();
-    mutation_result(status, &error, "File import staged");
-    return status == ZFS_OK;
+    mutation_result(ret, &error, "File import staged");
+    return ret == ZFS_OK;
 }
 
 static void import_files(void)
@@ -308,17 +308,17 @@ static void import_files(void)
 
 int ui_partition_viewer_get_partition_usage_percentage(uint64_t* free_bytes, uint64_t* total_bytes)
 {
-    uint64_t available = 0, total = 0;
+    uint64_t free_space = 0, size_bytes = 0;
     if (m_part_ctx.partition && m_part_ctx.disk) {
-        zfs_usage(m_part_ctx.disk->handle, current_partition(), &available, &total, NULL);
+        zfs_usage(m_part_ctx.disk->handle, current_partition(), &free_space, &size_bytes, NULL);
     }
     if (free_bytes) {
-        *free_bytes = available;
+        *free_bytes = free_space;
     }
     if (total_bytes) {
-        *total_bytes = total;
+        *total_bytes = size_bytes;
     }
-    return total ? (int) (100 - available * 100 / total) : 0;
+    return size_bytes ? (int) (100 - free_space * 100 / size_bytes) : 0;
 }
 
 static void ui_partition_viewer_show_usage(struct nk_context *ctx)

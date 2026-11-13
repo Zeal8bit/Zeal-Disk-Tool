@@ -8,7 +8,7 @@
 #include "zealfs.h"
 #include <stdio.h>
 #include <string.h>
-#define DIM(a) (sizeof(a) / sizeof(*(a)))
+#define DIM(arr) (sizeof(arr) / sizeof(*(arr)))
 #define GB UINT64_C(1073741824)
 #define MB UINT64_C(1048576)
 #define KB UINT64_C(1024)
@@ -49,31 +49,33 @@ typedef struct {
     int disk_count, selected_disk, selected_partition, selected_new_part_opt;
 } disk_list_state_t;
 
-static inline disk_info_t* disk_get_current(disk_list_state_t* s)
+static inline disk_info_t* disk_get_current(disk_list_state_t* state)
 {
-    return s && s->selected_disk >= 0 && s->selected_disk < s->disk_count ? &s->disks[s->selected_disk] : NULL;
+    return state && state->selected_disk >= 0 && state->selected_disk < state->disk_count
+               ? &state->disks[state->selected_disk]
+               : NULL;
 }
 
-static inline int disk_is_valid_zealfs_partition(partition_t* p)
+static inline int disk_is_valid_zealfs_partition(partition_t* part)
 {
-    return p && p->active && p->type == 0x5a;
+    return part && part->active && part->type == 0x5a;
 }
 
-static inline int disk_can_be_switched(disk_info_t* d)
+static inline int disk_can_be_switched(disk_info_t* disk)
 {
-    return !d || !d->has_staged_changes;
+    return !disk || !disk->has_staged_changes;
 }
 
 static inline const char* disk_get_basename(const char* path)
 {
-    const char* p = strrchr(path, '/');
+    const char* last_slash = strrchr(path, '/');
 #ifdef _WIN32
-    const char* b = strrchr(path, '\\');
-    if (b && (!p || b > p)) {
-        p = b;
+    const char* last_backslash = strrchr(path, '\\');
+    if (last_backslash && (!last_slash || last_backslash > last_slash)) {
+        last_slash = last_backslash;
     }
 #endif
-    return p ? p + 1 : path;
+    return last_slash ? last_slash + 1 : path;
 }
 
 disk_list_state_t* disk_get_state(void);
@@ -84,16 +86,16 @@ void disk_revert_changes(disk_info_t* disk);
 const char* const* disk_get_partition_size_list(int* count);
 uint64_t disk_get_size_of_idx(int index);
 int disk_create_mbr(disk_info_t* disk);
-void disk_allocate_partition(disk_info_t* disk, uint32_t lba, uint32_t sectors);
+void disk_allocate_partition(disk_info_t* disk, uint32_t lba, uint32_t sectors_count);
 const char* disk_format_partition(disk_info_t* disk, int partition);
 void disk_delete_partition(disk_info_t* disk, int partition);
-uint64_t disk_max_partition_size(disk_info_t* disk, uint32_t alignment, uint64_t* start);
-const char* disk_get_fs_type(uint8_t type);
-void disk_get_size_str(uint64_t size, char* buffer, int capacity);
+uint64_t disk_max_partition_size(disk_info_t* disk, uint32_t align, uint64_t* largest_free_addr);
+const char* disk_get_fs_type(uint8_t fs_byte);
+void disk_get_size_str(uint64_t size, char* buffer, int buffer_size);
 const char* disk_write_changes(disk_info_t* disk);
 int disk_open_image_file(disk_list_state_t* state);
 int disk_open_image_file_path(disk_list_state_t* state, const char* path);
-int disk_create_image(disk_list_state_t* state, const char* path, uint64_t size, bool mbr);
+int disk_create_image(disk_list_state_t* state, const char* path, uint64_t size, bool init_mbr);
 void disk_init_progress_bar(void);
 void disk_update_progress_bar(int percent);
 void disk_destroy_progress_bar(void);
