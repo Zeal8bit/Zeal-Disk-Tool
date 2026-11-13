@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # CMake owns all source lists, dependencies, and platform selection.
 BUILD_DIR ?= build/default
+CLI_BUILD_DIR ?= build/cli
 CMAKE_FLAGS ?=
+INSTALL_FLAGS ?=
 .PHONY: all configure test package install clean linux windows macosx cli
 all: configure
 	cmake --build $(BUILD_DIR)
@@ -12,11 +14,11 @@ test: all
 	ctest --test-dir $(BUILD_DIR) --output-on-failure
 package: all
 	cmake --build $(BUILD_DIR) --target package
-install: all
-	cmake --install $(BUILD_DIR)
+install: cli
+	cmake --install "$(CLI_BUILD_DIR)" --component CLI $(if $(PREFIX),--prefix "$(PREFIX)") $(INSTALL_FLAGS)
 cli:
-	cmake -S . -B build/cli -DZEALFS_BUILD_GUI=OFF $(CMAKE_FLAGS)
-	cmake --build build/cli
+	cmake -S . -B "$(CLI_BUILD_DIR)" -DZEALFS_BUILD_GUI=OFF $(CMAKE_FLAGS)
+	cmake --build "$(CLI_BUILD_DIR)" --target zdt
 ##########################
 #       Shortcuts        #
 ##########################

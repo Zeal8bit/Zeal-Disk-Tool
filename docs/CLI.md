@@ -11,6 +11,11 @@ zdt [-i IMAGE | -d DEVICE] shell
 
 Run `zdt` for a usage summary, `zdt --help` for full help, or `zdt --version` for the build version. The commands below assume the binary is on `PATH`; a source build can use `./build/default/zdt` instead. See [device access](DISKS.md#physical-device-access) before working with a TF card.
 
+To build and install `zdt` onto your command path, run `make install` from the
+source directory. See [CLI installation](BUILD.md#install-the-cli-from-source)
+for platform defaults, custom prefixes, and Windows commands. This installs only
+the CLI; place the GUI application wherever you prefer.
+
 ## Quick start with an image
 
 These commands create an MBR image, add a formatted ZealFS partition and import one file. Each mutation asks before applying its changes.

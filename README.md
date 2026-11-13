@@ -21,6 +21,10 @@ The project supports macOS, Linux (including Raspberry Pi) and Windows. See [sup
 
 ## Get started
 
+To build and install the CLI from source, run `make install`. It installs `zdt`
+into `bin` under the selected prefix; see [CLI installation](docs/BUILD.md#install-the-cli-from-source)
+for platform defaults and Windows commands. The GUI is placed manually.
+
 For the graphical workflow, open the application and follow the [GUI guide](docs/GUI.md). For terminal use, start with the [CLI quick start](docs/CLI.md#quick-start-with-an-image), or inspect an existing image:
 
 ```sh
