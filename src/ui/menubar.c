@@ -21,7 +21,7 @@ void ui_menubar_create_mbr(struct nk_context *ctx, disk_info_t* disk)
         } else if (disk->has_staged_changes) {
             info.msg = "Disk has staged changes, cannot proceed. Apply or cancel the changes first";
         } else {
-            info.msg = "This change CANNOT be reverted, it will take effect immediately, are you sure?";
+            info.msg = "Stage a new MBR? Use Apply to write it to disk, or Cancel to discard it.";
             info.data = (void*) 1;
         }
         popup_open(POPUP_MBR, 300, 140, &info);

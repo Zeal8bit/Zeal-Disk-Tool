@@ -1,6 +1,6 @@
 function(generate_version_header out)
     execute_process(
-        COMMAND git describe --always
+        COMMAND git -c "safe.directory=${CMAKE_SOURCE_DIR}" describe --always
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         RESULT_VARIABLE _git_result
         OUTPUT_VARIABLE GIT_VERSION
@@ -14,6 +14,12 @@ function(generate_version_header out)
     # Export APP_VERSION to parent scope for use in package targets (Info.plist, etc.)
     # Use the same version string as the header file
     set(APP_VERSION "${GIT_VERSION}" PARENT_SCOPE)
+
+    if(GIT_VERSION MATCHES "^v?([0-9]+\\.[0-9]+\\.[0-9]+)")
+        set(APP_NUMERIC_VERSION "${CMAKE_MATCH_1}" PARENT_SCOPE)
+    else()
+        set(APP_NUMERIC_VERSION "0.0.0" PARENT_SCOPE)
+    endif()
 
     file(WRITE ${out} "#define VERSION \"${GIT_VERSION}\"\n")
     add_custom_target(version_header DEPENDS ${out})
