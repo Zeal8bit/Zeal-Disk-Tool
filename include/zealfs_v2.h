@@ -120,6 +120,8 @@ typedef struct zealfs_context_t {
     /* Cache for the FAT table, at most 64K entries */
     uint16_t fat[64*KB];
     size_t fat_size;
+    /* Borrowed diagnostic for the latest engine failure; no console output. */
+    const char* error_message;
 } zealfs_context_t;
 
 
@@ -154,6 +156,9 @@ static inline int zealfsv2_page_size(uint64_t part_size)
 /**
  * @brief Format the partition.
  *
+ * @note Initializes filesystem metadata without console output. Frontends own
+ *       diagnostics; successful format geometry is not an error.
+ *
  * @param partition Pointer to the partition data.
  * @param size Size of the whole partition.
  *
@@ -185,10 +190,6 @@ static inline int zealfsv2_format(uint8_t* partition, uint64_t size) {
         uint32_t bitmap = 0xFF << last_valid_pages_count;
         header->pages_bitmap[header->bitmap_size - 1] = (uint8_t) (bitmap & 0xff);
     }
-
-#if 0
-
-#endif
 
     return 0;
 }

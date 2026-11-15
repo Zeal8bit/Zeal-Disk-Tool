@@ -5,6 +5,7 @@
  */
 /* Link-time native-backend replacement: no real device is ever opened. */
 #include "internal.h"
+#include "zealfs_v2.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -13,6 +14,8 @@ static unsigned writes;
 static bool deny_write;
 static bool fail_write;
 static bool fail_flush;
+static zfs_status read_failure_code;
+static uint64_t read_failure_offset;
 static zfs_error error;
 #define REQUIRE(value)                                                                                                 \
     do {                                                                                                               \
@@ -37,6 +40,9 @@ zfs_status zfs_native_open(const char* path, bool writing, zfs_native* fd, uint6
 zfs_status zfs_native_read(zfs_native fd, uint64_t offset, void* data, size_t size, zfs_error* e)
 {
     (void) fd;
+    if (read_failure_code != ZFS_OK && offset >= read_failure_offset) {
+        return zfs_error_set(e, read_failure_code, "Simulated device read failure");
+    }
     if (offset > sizeof(media) || size > sizeof(media) - offset) {
         return zfs_error_set(e, ZFS_IO, "Read out of bounds");
     }
@@ -97,6 +103,55 @@ static zfs_disk* staged(void)
     return d;
 }
 
+static void diagnostics(zfs_disk* disk)
+{
+    zfs_entry* entries = NULL;
+    size_t count = 0;
+    uint64_t free_before;
+    uint64_t free_after;
+    uint64_t total;
+    unsigned previous_writes = writes;
+    zealfs_header_t* header = (zealfs_header_t*) (media + DISK_SECTOR_SIZE);
+
+    /* Header I/O failures keep their backend status instead of becoming corruption. */
+    read_failure_offset = DISK_SECTOR_SIZE;
+    read_failure_code = ZFS_PERMISSION;
+    REQUIRE(zfs_list(disk, 0, "/", &entries, &count, &error) == ZFS_PERMISSION);
+    REQUIRE(error.code == ZFS_PERMISSION && strcmp(error.message, "Simulated device read failure") == 0);
+    REQUIRE(entries == NULL && count == 0);
+    read_failure_code = ZFS_IO;
+    REQUIRE(zfs_list(disk, 0, "/", &entries, &count, &error) == ZFS_IO);
+    REQUIRE(error.code == ZFS_IO && strcmp(error.message, "Simulated device read failure") == 0);
+    read_failure_code = ZFS_OK;
+    OK(zfs_list(disk, 0, "/", &entries, &count, &error));
+    REQUIRE(count == 1 && strcmp(entries[0].name, "staged") == 0);
+    zfs_entries_free(entries);
+
+    /* Failing a data-page write preserves the cause through transaction rollback. */
+    OK(zfs_usage(disk, 0, &free_before, &total, &error));
+    read_failure_offset = 2 * DISK_SECTOR_SIZE;
+    read_failure_code = ZFS_IO;
+    REQUIRE(zfs_mkdir(disk, 0, "/new", &error) == ZFS_IO);
+    REQUIRE(error.code == ZFS_IO && strcmp(error.message, "Simulated device read failure") == 0);
+    REQUIRE(!zfs_get_info(disk)->pending && !zfs_get_info(disk)->failed);
+    read_failure_code = ZFS_OK;
+    OK(zfs_usage(disk, 0, &free_after, &total, &error));
+    REQUIRE(free_before == free_after);
+
+    /* The first directory occupies page 2 in this 256-byte-page fixture.
+     * Refuse to free it when its bitmap bit is missing, without publishing edits. */
+    header->pages_bitmap[0] &= ~(1 << 2);
+    REQUIRE(zfs_remove(disk, 0, "/staged", true, &error) == ZFS_CORRUPT);
+    REQUIRE(error.code == ZFS_CORRUPT && strcmp(error.message, "ZealFS page is already free") == 0);
+    REQUIRE(zfs_remove(disk, 0, "/staged", true, NULL) == ZFS_CORRUPT);
+    REQUIRE(!zfs_get_info(disk)->pending && !zfs_get_info(disk)->failed);
+    header->pages_bitmap[0] |= 1 << 2;
+    REQUIRE(writes == previous_writes);
+    OK(zfs_list(disk, 0, "/", &entries, &count, &error));
+    REQUIRE(count == 1 && strcmp(entries[0].name, "staged") == 0);
+    zfs_entries_free(entries);
+}
+
 int main(void)
 {
     zfs_disk* d = staged();
@@ -110,6 +165,7 @@ int main(void)
     deny_write = false;
     OK(zfs_apply(d, &error));
     REQUIRE(writes > 1 && !zfs_get_info(d)->pending);
+    diagnostics(d);
     zfs_close(d);
     d = staged();
     fail_write = true;

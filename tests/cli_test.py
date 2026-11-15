@@ -124,4 +124,19 @@ with tempfile.TemporaryDirectory(prefix="zdt-cli-") as directory:
     unicode_export = root / "export-ζ.bin"
     run("--image", unicode_image, "export", "/file.bin", unicode_export)
     assert unicode_export.read_bytes() == unicode_source.read_bytes()
+    # Corruption is reported by the frontend; the core must not contaminate
+    # either the JSON result or normal command output with diagnostic prints.
+    damaged = root / "damaged.img"
+    damaged.write_bytes(b"Z" + bytes([2]) + bytes(8190))
+    original = digest(damaged)
+    failure = run("--image", damaged, "ls", "--json", code=1)
+    result = json.loads(failure.stdout)
+    assert result["error"]["code"] == "corrupt filesystem"
+    assert result["error"]["message"] == "Invalid ZealFS page or bitmap size"
+    assert failure.stderr == "zdt: " + result["error"]["message"] + "\n"
+    failure = run("--image", damaged, "ls", code=1)
+    assert failure.stdout == "" and "Invalid ZealFS page or bitmap size" in failure.stderr
+    failure = run("--image", damaged, "shell", data="ls\nquit\n", code=1)
+    assert "Invalid ZealFS page or bitmap size" in failure.stderr
+    assert "[ZEALFS]" not in failure.stdout and digest(damaged) == original
 print("CLI commands, JSON, confirmation, dry-run, shell and transfers passed")

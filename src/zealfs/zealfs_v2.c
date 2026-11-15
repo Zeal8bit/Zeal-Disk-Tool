@@ -35,6 +35,13 @@ typedef struct {
 } browse_out_t;
 
 
+/* Keep diagnostics with the result; the caller decides how to display them. */
+static int zealfs_error(zealfs_context_t* ctx, int code, const char* message)
+{
+    ctx->error_message = message;
+    return -code;
+}
+
 /**
  * @brief Get the size of the FileSystem header, multiple of 32 (sizeof(zealfs_entry_t))
  */
@@ -60,17 +67,19 @@ static inline int get_page_size(const zealfs_header_t* header)
 
 static inline int check_header(zealfs_context_t* ctx) {
     zealfs_header_t* header = (zealfs_header_t*) ctx->header;
+    ctx->error_message = NULL;
     /* Initialize the header if it is not initialized yet */
-    if (ctx->header_size) {
+    if (ctx->header_size != 0) {
         return 0;
     }
     if (ctx->read(ctx->arg, ctx->header, 0, sizeof(zealfs_header_t)) != sizeof(zealfs_header_t)) {
-        return -EIO;
+        return zealfs_error(ctx, EIO, "Cannot read ZealFS header");
     }
-    if (header->magic != ZEALFS_V2_MAGIC || header->version != ZEALFS_V2_VERSION ||
-        header->page_size > ZEALFS_V2_MAX_PAGE_SHIFT || !header->bitmap_size ||
-        header->bitmap_size > 8192) {
-        return -EIO;
+    if (header->magic != ZEALFS_V2_MAGIC || header->version != ZEALFS_V2_VERSION) {
+        return zealfs_error(ctx, EILSEQ, "Not a ZealFS v2 filesystem");
+    }
+    if (header->page_size > ZEALFS_V2_MAX_PAGE_SHIFT || header->bitmap_size == 0 || header->bitmap_size > 8192) {
+        return zealfs_error(ctx, EILSEQ, "Invalid ZealFS page or bitmap size");
     }
     size_t header_size = get_fs_header_size(header);
     size_t page_size = get_page_size(header);
@@ -79,16 +88,18 @@ static inline int check_header(zealfs_context_t* ctx) {
      * else, two pages */
     size_t fat_size = page_size == 256 ? page_size : 2 * page_size;
     if (header_size > page_size || pages > (page_size == 256 ? fat_size : fat_size / 2) || header->free_pages > pages) {
-        return -EIO;
+        return zealfs_error(ctx, EILSEQ, "Invalid ZealFS header layout or free-page count");
     }
-    if (ctx->read(ctx->arg, ctx->header, 0, header_size) != (ssize_t) header_size ||
-        ctx->read(ctx->arg, ctx->fat, page_size, fat_size) != (ssize_t) fat_size) {
-        return -EIO;
+    if (ctx->read(ctx->arg, ctx->header, 0, header_size) != (ssize_t) header_size) {
+        return zealfs_error(ctx, EIO, "Cannot read ZealFS header bitmap");
+    }
+    if (ctx->read(ctx->arg, ctx->fat, page_size, fat_size) != (ssize_t) fat_size) {
+        return zealfs_error(ctx, EIO, "Cannot read ZealFS allocation table");
     }
     for (size_t i = 0; i < pages; ++i) {
         uint16_t next = page_size == 256 ? ((uint8_t*) ctx->fat)[i] : ctx->fat[i];
-        if (next && (next < (page_size == 256 ? 2 : 3) || next >= pages)) {
-            return -EIO;
+        if (next != 0 && (next < (page_size == 256 ? 2 : 3) || next >= pages)) {
+            return zealfs_error(ctx, EILSEQ, "Invalid page reference in ZealFS allocation table");
         }
     }
     ctx->header_size = header_size;
@@ -134,28 +145,33 @@ static inline uint8_t to_bcd(int value) {
 /**
  * @brief Free a page in the header bitmap.
  *
- * @param header File system header containing the bitmap to update.
+ * @param ctx File system context containing the bitmap and error diagnostic.
  * @param page Page number to free, must not be 0.
  *
  */
-static inline void free_page(zealfs_header_t* header, uint16_t page) {
-    if (!page || page >= header->bitmap_size * 8u) {
-        return;
+static inline int free_page(zealfs_context_t* ctx, uint16_t page) {
+    zealfs_header_t* header = (zealfs_header_t*) ctx->header;
+    if (page == 0 || page < (header->page_size == 0 ? 2 : 3) || page >= header->bitmap_size * 8) {
+        return zealfs_error(ctx, EILSEQ, "Cannot free an invalid or reserved ZealFS page");
+    }
+    if ((header->pages_bitmap[page / 8] & (1 << (page % 8))) == 0) {
+        return zealfs_error(ctx, EILSEQ, "ZealFS page is already free");
     }
     header->pages_bitmap[page / 8] &= ~(1 << (page % 8));
     header->free_pages++;
+    return 0;
 }
 
 
 /**
  * @brief Get the next page of the current from the FAT
  */
-static uint16_t get_next_from_fat(zealfs_context_t* ctx, uint16_t current_page)
+static int get_next_from_fat(zealfs_context_t* ctx, uint16_t current_page)
 {
     const zealfs_header_t* header = (zealfs_header_t*) ctx->header;
     assert(header->magic != 0);
-    if (current_page >= header->bitmap_size * 8u) {
-        return 0;
+    if (current_page >= header->bitmap_size * 8) {
+        return zealfs_error(ctx, EILSEQ, "Cannot read an invalid ZealFS allocation-table page");
     }
     if (header->page_size == 0) {
         /* 256-byte pages */
@@ -169,12 +185,12 @@ static uint16_t get_next_from_fat(zealfs_context_t* ctx, uint16_t current_page)
 /**
  * @brief Get the next page of the current from the FAT
  */
-static void set_next_in_fat(zealfs_context_t* ctx, uint16_t current_page, uint16_t next_page)
+static int set_next_in_fat(zealfs_context_t* ctx, uint16_t current_page, uint16_t next_page)
 {
     const zealfs_header_t* header = (zealfs_header_t*) ctx->header;
     assert(header->magic != 0);
-    if (current_page >= header->bitmap_size * 8u) {
-        return;
+    if (current_page >= header->bitmap_size * 8) {
+        return zealfs_error(ctx, EILSEQ, "Cannot update an invalid ZealFS allocation-table page");
     }
     if (header->page_size == 0) {
         /* 256-byte pages */
@@ -182,6 +198,7 @@ static void set_next_in_fat(zealfs_context_t* ctx, uint16_t current_page, uint16
     } else {
         ctx->fat[current_page] = next_page;
     }
+    return 0;
 }
 
 
@@ -232,7 +249,7 @@ uint64_t zealfs_total_space(zealfs_context_t* ctx)
 {
     zealfs_header_t* header = (zealfs_header_t*) ctx->header;
     assert (check_header(ctx) == 0);
-    const uint32_t pages_count = (uint32_t) header->bitmap_size * 8U;
+    const uint32_t pages_count = (uint32_t) header->bitmap_size * 8;
     return (uint64_t) pages_count * get_page_size(header);
 }
 
@@ -286,19 +303,19 @@ next_component:
         len = strlen(path);
     }
     if (len > NAME_MAX_LEN) {
-        return -1;
+        return -ENAMETOOLONG;
     }
     memcpy(tmp_name, path, len);
 
     unsigned chain_count = 0;
     while (1) {
-        if (++chain_count > header->bitmap_size * 8u || (unsigned) current_page >= header->bitmap_size * 8u) {
-            return -EIO;
+        if (++chain_count > header->bitmap_size * 8 || (unsigned) current_page >= header->bitmap_size * 8) {
+            return zealfs_error(ctx, EILSEQ, "Invalid or cyclic ZealFS page chain");
         }
         /* Read all the entries from disk */
         int rd = ctx->read(ctx->arg, (void*) entries, entries_addr, max_entries * sizeof(zealfs_entry_t));
         if (rd < 0) {
-
+            zealfs_error(ctx, EIO, "Cannot read ZealFS directory entries");
             return rd;
         }
 
@@ -334,6 +351,9 @@ next_component:
         }
         /* Entry was not found and all entries were tested, get the next page for the directory */
         current_page = get_next_from_fat(ctx, current_page);
+        if (current_page < 0) {
+            return current_page;
+        }
         if (current_page == 0) {
             /* No next page, reached the end of the directory, return 0 (not found) */
             return 0;
@@ -359,8 +379,9 @@ int zealfs_open(const char * path, zealfs_context_t* ctx, zealfs_fd_t* fd)
     browse_out_t info;
     zealfs_header_t* header = (zealfs_header_t*) ctx->header;
 
-    if (check_header(ctx)) {
-        return -1;
+    int header_error = check_header(ctx);
+    if (header_error < 0) {
+        return header_error;
     }
 
     if (strcmp(path, "/") == 0) {
@@ -393,8 +414,9 @@ int zealfs_unlink(const char* path, zealfs_context_t* ctx)
 {
     browse_out_t info;
     zealfs_header_t* header = (zealfs_header_t*) ctx->header;
-    if (check_header(ctx)) {
-        return -1;
+    int header_error = check_header(ctx);
+    if (header_error < 0) {
+        return header_error;
     }
 
     int index = browse_path(ctx, path + 1, get_root_dir_addr(header), 1, &info);
@@ -413,12 +435,21 @@ int zealfs_unlink(const char* path, zealfs_context_t* ctx)
     uint16_t page = info.entry.start_page;
     unsigned chain_count = 0;
     while (page != 0) {
-        if (++chain_count > header->bitmap_size * 8u || page < 2 || page >= header->bitmap_size * 8u) {
-            return -EIO;
+        if (++chain_count > header->bitmap_size * 8 || page < 2 || page >= header->bitmap_size * 8) {
+            return zealfs_error(ctx, EILSEQ, "Invalid or cyclic ZealFS page chain");
         }
-        free_page(header, page);
-        const uint16_t next = get_next_from_fat(ctx, page);
-        set_next_in_fat(ctx, page, 0);
+        const int next = get_next_from_fat(ctx, page);
+        if (next < 0) {
+            return next;
+        }
+        int result = free_page(ctx, page);
+        if (result < 0) {
+            return result;
+        }
+        result = set_next_in_fat(ctx, page, 0);
+        if (result < 0) {
+            return result;
+        }
         page = next;
     }
     /* Clear the flags of the file entry */
@@ -427,7 +458,7 @@ int zealfs_unlink(const char* path, zealfs_context_t* ctx)
     /* Clear the entry on disk */
     int wr = ctx->write(ctx->arg, &info.entry, info.entry_addr, sizeof(zealfs_entry_t));
     if (wr < 0) {
-
+        zealfs_error(ctx, EIO, "Cannot write ZealFS directory entry");
         return wr;
     }
 
@@ -435,14 +466,14 @@ int zealfs_unlink(const char* path, zealfs_context_t* ctx)
     const int page_size = get_page_size(header);
     wr = ctx->write(ctx->arg, header, 0, ctx->header_size);
     if (wr < 0) {
-
+        zealfs_error(ctx, EIO, "Cannot write ZealFS header bitmap");
         return wr;
     }
 
     /* Update the FAT table and write it back to the disk */
     wr = ctx->write(ctx->arg, ctx->fat, page_size, ctx->fat_size);
     if (wr < 0) {
-
+        zealfs_error(ctx, EIO, "Cannot write ZealFS allocation table");
         return wr;
     }
 
@@ -530,8 +561,9 @@ int zealfs_rmdir(const char* path, zealfs_context_t* ctx)
     zealfs_entry_t entries[2048];
     zealfs_header_t* header = (zealfs_header_t*) ctx->header;
 
-    if (check_header(ctx)) {
-        return -1;
+    int header_error = check_header(ctx);
+    if (header_error < 0) {
+        return header_error;
     }
 
     if (strcmp(path, "/") == 0) {
@@ -554,14 +586,14 @@ int zealfs_rmdir(const char* path, zealfs_context_t* ctx)
 
     unsigned chain_count = 0;
     while (current_page != 0) {
-        if (++chain_count > header->bitmap_size * 8u || current_page < 2 ||
-            (unsigned) current_page >= header->bitmap_size * 8u) {
-            return -EIO;
+        if (++chain_count > header->bitmap_size * 8 || current_page < 2 ||
+            (unsigned) current_page >= header->bitmap_size * 8) {
+            return zealfs_error(ctx, EILSEQ, "Invalid or cyclic ZealFS page chain");
         }
         const uint32_t page_addr = ADDR_FROM_PAGE(header, current_page);
         int rd = ctx->read(ctx->arg, (void*) entries, page_addr, max_entries * sizeof(zealfs_entry_t));
         if (rd < 0) {
-
+            zealfs_error(ctx, EIO, "Cannot read ZealFS directory entries");
             return rd;
         }
 
@@ -571,9 +603,18 @@ int zealfs_rmdir(const char* path, zealfs_context_t* ctx)
             }
         }
 
-        uint16_t next_page = get_next_from_fat(ctx, current_page);
-        free_page(header, current_page);
-        set_next_in_fat(ctx, current_page, 0);
+        int next_page = get_next_from_fat(ctx, current_page);
+        if (next_page < 0) {
+            return next_page;
+        }
+        int result = free_page(ctx, current_page);
+        if (result < 0) {
+            return result;
+        }
+        result = set_next_in_fat(ctx, current_page, 0);
+        if (result < 0) {
+            return result;
+        }
         current_page = next_page;
     }
 
@@ -581,7 +622,7 @@ int zealfs_rmdir(const char* path, zealfs_context_t* ctx)
     memset(&info.entry, 0, sizeof(zealfs_entry_t));
     int wr = ctx->write(ctx->arg, &info.entry, info.entry_addr, sizeof(zealfs_entry_t));
     if (wr < 0) {
-
+        zealfs_error(ctx, EIO, "Cannot write ZealFS directory entry");
         return wr;
     }
 
@@ -589,14 +630,14 @@ int zealfs_rmdir(const char* path, zealfs_context_t* ctx)
     const int page_size = get_page_size(header);
     wr = ctx->write(ctx->arg, header, 0, ctx->header_size);
     if (wr < 0) {
-
+        zealfs_error(ctx, EIO, "Cannot write ZealFS header bitmap");
         return wr;
     }
 
     /* Update the FAT table and write it back to the disk */
     wr = ctx->write(ctx->arg, ctx->fat, page_size, ctx->fat_size);
     if (wr < 0) {
-
+        zealfs_error(ctx, EIO, "Cannot write ZealFS allocation table");
         return wr;
     }
 
@@ -623,8 +664,9 @@ static int zealfs_create_both(zealfs_context_t* ctx, int isdir, const char * pat
     int err;
 
     zealfs_header_t* header = (zealfs_header_t*) ctx->header;
-    if (check_header(ctx)) {
-        return -1;
+    int header_error = check_header(ctx);
+    if (header_error < 0) {
+        return header_error;
     }
 
     /* Make a backup of the header in case we fail to write to disk */
@@ -645,8 +687,14 @@ static int zealfs_create_both(zealfs_context_t* ctx, int isdir, const char * pat
             return -ENOSPC;
         }
         /* We'll need to clean the new page later */
-        set_next_in_fat(ctx, new_page_dir, 0);
-        set_next_in_fat(ctx, info.last_dir_page, new_page_dir);
+        err = set_next_in_fat(ctx, new_page_dir, 0);
+        if (err < 0) {
+            return err;
+        }
+        err = set_next_in_fat(ctx, info.last_dir_page, new_page_dir);
+        if (err < 0) {
+            return err;
+        }
         /* The address of the new entry is the same as the new page's */
         info.free_entry_addr = ADDR_FROM_PAGE(header, new_page_dir);
     }
@@ -666,7 +714,10 @@ static int zealfs_create_both(zealfs_context_t* ctx, int isdir, const char * pat
         *header = header_backup;
         return -ENOSPC;
     }
-    set_next_in_fat(ctx, newp, 0);
+    err = set_next_in_fat(ctx, newp, 0);
+    if (err < 0) {
+        return err;
+    }
     /* Fill the new entry structure */
     entry.flags = IS_OCCUPIED | isdir;
     entry.start_page = newp;
@@ -678,12 +729,12 @@ static int zealfs_create_both(zealfs_context_t* ctx, int isdir, const char * pat
     time(&rawtime);
     struct tm timestamp;
 #ifdef _WIN32
-    if (localtime_s(&timestamp, &rawtime)) {
-        return -EIO;
+    if (localtime_s(&timestamp, &rawtime) != 0) {
+        return zealfs_error(ctx, EIO, "Cannot obtain the file timestamp");
     }
 #else
-    if (!localtime_r(&rawtime, &timestamp)) {
-        return -EIO;
+    if (localtime_r(&rawtime, &timestamp) == NULL) {
+        return zealfs_error(ctx, EIO, "Cannot obtain the file timestamp");
     }
 #endif
     const struct tm* timest = &timestamp;
@@ -707,13 +758,13 @@ static int zealfs_create_both(zealfs_context_t* ctx, int isdir, const char * pat
     const uint8_t buffer[64*KB] = { 0 };
     int wr = ctx->write(ctx->arg, buffer, ADDR_FROM_PAGE(header, newp), page_size);
     if (wr < 0) {
-
+        zealfs_error(ctx, EIO, "Cannot clear a new ZealFS page");
         goto write_error;
     }
     if (new_page_dir) {
         wr = ctx->write(ctx->arg, buffer, ADDR_FROM_PAGE(header, new_page_dir), page_size);
         if (wr < 0) {
-
+            zealfs_error(ctx, EIO, "Cannot clear a new ZealFS directory page");
             goto write_error;
         }
     }
@@ -721,21 +772,21 @@ static int zealfs_create_both(zealfs_context_t* ctx, int isdir, const char * pat
     /* Write the new entry back to the disk */
     wr = ctx->write(ctx->arg, &entry, info.free_entry_addr, sizeof(zealfs_entry_t));
     if (wr < 0) {
-
+        zealfs_error(ctx, EIO, "Cannot write ZealFS directory entry");
         goto write_error;
     }
 
     /* Write the new header (bitmap) to the disk too */
     wr = ctx->write(ctx->arg, header, 0, ctx->header_size);
     if (wr < 0) {
-
+        zealfs_error(ctx, EIO, "Cannot write ZealFS header bitmap");
         goto write_error;
     }
 
     /* Update the FAT table and write it back to the disk */
     wr = ctx->write(ctx->arg, ctx->fat, page_size, ctx->fat_size);
     if (wr < 0) {
-
+        zealfs_error(ctx, EIO, "Cannot write ZealFS allocation table");
         goto write_error;
     }
 
@@ -783,8 +834,12 @@ int zealfs_mkdir(const char * path, zealfs_context_t* ctx, zealfs_fd_t* fd)
 int zealfs_read(zealfs_context_t* ctx, zealfs_fd_t* fd, void* buf, size_t size, int64_t offset)
 {
     zealfs_header_t* header = (zealfs_header_t*) ctx->header;
-    if (check_header(ctx) || fd == NULL) {
-        return -1;
+    int header_error = check_header(ctx);
+    if (header_error < 0) {
+        return header_error;
+    }
+    if (fd == NULL) {
+        return -EINVAL;
     }
     if (size == 0) {
         return 0;
@@ -806,27 +861,35 @@ int zealfs_read(zealfs_context_t* ctx, zealfs_fd_t* fd, void* buf, size_t size, 
 
     uint_fast16_t current_page = entry->start_page;
     while (jump_pages) {
-        if (current_page < 2 || (unsigned) current_page >= header->bitmap_size * 8u) {
-            return -EIO;
+        if (current_page < 2 || (unsigned) current_page >= header->bitmap_size * 8) {
+            return zealfs_error(ctx, EILSEQ, "Invalid or cyclic ZealFS page chain");
         }
-        current_page = get_next_from_fat(ctx, current_page);
+        int next_page = get_next_from_fat(ctx, current_page);
+        if (next_page < 0) {
+            return next_page;
+        }
+        current_page = next_page;
         jump_pages--;
     }
 
     uint32_t page_addr = ADDR_FROM_PAGE(header, current_page);
 
     while (size) {
-        if (current_page < (header->page_size == 0 ? 2 : 3) || current_page >= header->bitmap_size * 8u) {
-            return -EIO;
+        if (current_page < (header->page_size == 0 ? 2 : 3) || current_page >= header->bitmap_size * 8) {
+            return zealfs_error(ctx, EILSEQ, "Invalid or cyclic ZealFS page chain");
         }
         int count = MIN((size_t) (data_bytes_per_page - offset_in_page), size);
         /* Read data from disk */
         if (ctx->read(ctx->arg, buf, page_addr + offset_in_page, count) != count) {
-            return -EIO;
+            return zealfs_error(ctx, EIO, "Cannot read ZealFS file data");
         }
         buf = (uint8_t*) buf + count;
         if (size != (size_t) count) {
-            current_page = get_next_from_fat(ctx, current_page);
+            int next_page = get_next_from_fat(ctx, current_page);
+            if (next_page < 0) {
+                return next_page;
+            }
+            current_page = next_page;
             page_addr = ADDR_FROM_PAGE(header, current_page);
         }
         size -= count;
@@ -845,17 +908,24 @@ static int allocate_next(zealfs_context_t* ctx, zealfs_header_t* header, uint_fa
         return -ENOSPC;
     }
     /* Link the newly allocated page to the current page */
-    set_next_in_fat(ctx, current_page, next);
+    int result = set_next_in_fat(ctx, current_page, next);
+    if (result < 0) {
+        return result;
+    }
     /* Set the new page as having no next page*/
-    set_next_in_fat(ctx, next, 0);
-    return next;
+    result = set_next_in_fat(ctx, next, 0);
+    return result < 0 ? result : (int) next;
 }
 
 int zealfs_write(zealfs_context_t* ctx, zealfs_fd_t* fd, void* buf, size_t size, int64_t offset)
 {
     zealfs_header_t* header = (zealfs_header_t*) ctx->header;
-    if (check_header(ctx) || fd == NULL) {
-        return -1;
+    int header_error = check_header(ctx);
+    if (header_error < 0) {
+        return header_error;
+    }
+    if (fd == NULL) {
+        return -EINVAL;
     }
 
     if (size == 0) {
@@ -877,16 +947,19 @@ int zealfs_write(zealfs_context_t* ctx, zealfs_fd_t* fd, void* buf, size_t size,
     uint_fast16_t current_page = fd->entry.start_page;
 
     while (jump_pages) {
-        if (current_page < 2 || (unsigned) current_page >= header->bitmap_size * 8u) {
-            return -EIO;
+        if (current_page < 2 || (unsigned) current_page >= header->bitmap_size * 8) {
+            return zealfs_error(ctx, EILSEQ, "Invalid or cyclic ZealFS page chain");
         }
         int next_page = get_next_from_fat(ctx, current_page);
+        if (next_page < 0) {
+            return next_page;
+        }
         if (next_page == 0) {
             /* There is no more pages to browse but we need to write new data, so allocate a new page.
              * This state must only occur when we are browsing the last page! Else, the disk is corrupted */
             if (jump_pages != 1) {
 
-                return -ESPIPE;
+                return zealfs_error(ctx, EILSEQ, "ZealFS file page chain ends before the requested offset");
             }
             next_page = allocate_next(ctx, header, current_page);
             /* Make sure the new page is valid! */
@@ -900,15 +973,15 @@ int zealfs_write(zealfs_context_t* ctx, zealfs_fd_t* fd, void* buf, size_t size,
 
     while (size) {
         /* Data page cannot be 0 (header) or FAT (1 for sure) */
-        if (current_page < (header->page_size == 0 ? 2 : 3) || (unsigned) current_page >= header->bitmap_size * 8u) {
-            return -EIO;
+        if (current_page < (header->page_size == 0 ? 2 : 3) || (unsigned) current_page >= header->bitmap_size * 8) {
+            return zealfs_error(ctx, EILSEQ, "Invalid or cyclic ZealFS page chain");
         }
         uint32_t page_addr = ADDR_FROM_PAGE(header, current_page);
         uint32_t count = MIN((size_t) (data_bytes_per_page - offset_in_page), size);
 
         int wr = ctx->write(ctx->arg, buf, page_addr + offset_in_page, count);
         if (wr < 0) {
-
+            zealfs_error(ctx, EIO, "Cannot write ZealFS file data");
             return wr;
         }
         if ((uint64_t) offset + (total - size) + count > fd->entry.size) {
@@ -918,8 +991,11 @@ int zealfs_write(zealfs_context_t* ctx, zealfs_fd_t* fd, void* buf, size_t size,
         size -= count;
 
         /* In all cases, check the next page */
-        uint16_t next = get_next_from_fat(ctx, current_page);
-        if (next) {
+        int next = get_next_from_fat(ctx, current_page);
+        if (next < 0) {
+            return next;
+        }
+        if (next != 0) {
             current_page = next;
         } else if (size) {
             int next_page = allocate_next(ctx, header, current_page);
@@ -939,28 +1015,32 @@ int zealfs_write(zealfs_context_t* ctx, zealfs_fd_t* fd, void* buf, size_t size,
 int zealfs_flush(zealfs_context_t* ctx, zealfs_fd_t* fd)
 {
     zealfs_header_t* header = (zealfs_header_t*) ctx->header;
-    if (check_header(ctx) || fd == NULL) {
-        return -1;
+    int header_error = check_header(ctx);
+    if (header_error < 0) {
+        return header_error;
+    }
+    if (fd == NULL) {
+        return -EINVAL;
     }
 
     /* Write the updated entry back to the disk */
     int wr = ctx->write(ctx->arg, &fd->entry, fd->entry_addr, sizeof(zealfs_entry_t));
     if (wr < 0) {
-
+        zealfs_error(ctx, EIO, "Cannot write ZealFS directory entry");
         return wr;
     }
 
     /* Write the updated header (bitmap) to the disk */
     wr = ctx->write(ctx->arg, header, 0, get_fs_header_size(header));
     if (wr < 0) {
-
+        zealfs_error(ctx, EIO, "Cannot write ZealFS header bitmap");
         return wr;
     }
 
     /* Update the FAT table and write it back to the disk */
     wr = ctx->write(ctx->arg, ctx->fat, ADDR_FROM_PAGE(header, 1), ctx->fat_size);
     if (wr < 0) {
-
+        zealfs_error(ctx, EIO, "Cannot write ZealFS allocation table");
         return wr;
     }
 
@@ -980,8 +1060,12 @@ int zealfs_opendir(const char * path, zealfs_context_t* ctx, zealfs_fd_t* fd)
 {
     browse_out_t info = { 0 };
     zealfs_header_t* header = (zealfs_header_t*) ctx->header;
-    if (check_header(ctx) || fd == NULL) {
-        return -1;
+    int header_error = check_header(ctx);
+    if (header_error < 0) {
+        return header_error;
+    }
+    if (fd == NULL) {
+        return -EINVAL;
     }
 
     if (strcmp(path, "/") == 0) {
@@ -1015,8 +1099,12 @@ int zealfs_readdir(zealfs_context_t* ctx, zealfs_fd_t* fd, zealfs_entry_t* ret_e
     zealfs_entry_t entries[2048];
     zealfs_header_t* header = (zealfs_header_t*) ctx->header;
 
-    if (check_header(ctx) || fd == NULL) {
-        return -1;
+    int header_error = check_header(ctx);
+    if (header_error < 0) {
+        return header_error;
+    }
+    if (fd == NULL) {
+        return -EINVAL;
     }
 
     const int is_root = fd->entry_addr == get_root_dir_addr(header);
@@ -1030,12 +1118,13 @@ int zealfs_readdir(zealfs_context_t* ctx, zealfs_fd_t* fd, zealfs_entry_t* ret_e
 
     unsigned chain_count = 0;
     while (1) {
-        if (++chain_count > header->bitmap_size * 8u || (unsigned) current_page >= header->bitmap_size * 8u) {
-            return -EIO;
+        if (++chain_count > header->bitmap_size * 8 || (unsigned) current_page >= header->bitmap_size * 8) {
+            return zealfs_error(ctx, EILSEQ, "Invalid or cyclic ZealFS page chain");
         }
         /* Read all the entries from disk */
         int rd = ctx->read(ctx->arg, (void*) entries, current_addr, max_entries * sizeof(zealfs_entry_t));
         if (rd < 0) {
+            zealfs_error(ctx, EIO, "Cannot read ZealFS directory entries");
             return rd;
         }
 
@@ -1054,7 +1143,11 @@ int zealfs_readdir(zealfs_context_t* ctx, zealfs_fd_t* fd, zealfs_entry_t* ret_e
 
         max_entries = get_dir_max_entries(header);
         /* Get the next page of the directory */
-        current_page = get_next_from_fat(ctx, current_page);
+        int next_page = get_next_from_fat(ctx, current_page);
+        if (next_page < 0) {
+            return next_page;
+        }
+        current_page = next_page;
         if (current_page == 0) {
             break;
         }
@@ -1070,11 +1163,16 @@ void zealfs_destroy(zealfs_context_t* ctx)
     /* Remove the header that was previously loaded */
     memset(ctx->header, 0, sizeof(ctx->header));
     ctx->header_size = ctx->fat_size = 0;
+    ctx->error_message = NULL;
 }
 
 int zealfs_stat(const char* path, zealfs_context_t* ctx, zealfs_fd_t* fd)
 {
-    if (check_header(ctx) || !fd || !strcmp(path, "/")) {
+    int header_error = check_header(ctx);
+    if (header_error < 0) {
+        return header_error;
+    }
+    if (fd == NULL || strcmp(path, "/") == 0) {
         return -EINVAL;
     }
     browse_out_t info;

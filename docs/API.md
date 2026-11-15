@@ -40,6 +40,13 @@ int create_image(void)
 - All API partition indices are zero-based. The CLI translates user-visible partition numbers 1–4; the GUI labels slots 0–3. API paths use `/` within the filesystem, independently of the host OS; dot components and trailing slashes are rejected except for root `/`. The CLI accepts optional leading/trailing slashes and normalizes its filesystem arguments before calling the API.
 - Each handle is single-threaded. Different handles can be used independently; do not concurrently apply to the same target. Progress/log callbacks run synchronously and must not reenter that handle.
 
+Filesystem failures retain the backend status and message when I/O fails.
+Detected invalid headers, page references and chains return `ZFS_CORRUPT` with a
+diagnostic. Frontends own user notifications: the CLI writes errors to stderr
+and includes them in JSON results; the GUI uses its existing status/error
+displays. Informational format geometry is not a failure and is not printed
+automatically.
+
 ## Transfer requests
 
 `zfs_import_files` and `zfs_export_files` take a disk handle, a request structure,
