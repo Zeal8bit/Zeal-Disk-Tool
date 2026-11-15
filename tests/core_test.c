@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#include "zealfs.h"
+#include "disk_tool.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

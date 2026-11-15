@@ -2,10 +2,10 @@
 
 [README](../README.md) · [CLI guide](CLI.md) · [GUI guide](GUI.md) · [ZealFS concepts](ZEALFS.md) · [Disk operations](DISKS.md) · [Build/install](BUILD.md)
 
-`include/zealfs.h` is the public interface. Link the CMake target `zealfs_core` or the installed static library. It has no GUI or console dependencies. The disk and session are represented by one opaque `zfs_disk` handle; each handle owns its image/device descriptor, temporary sector overlay and callbacks. Multiple handles are independent, with no global current disk or partition.
+`include/disk_tool.h` is the public interface for the higher-level Disk Tool library. It builds on the private ZealFS v2 engine to provide image/device access, partition management, staged filesystem edits, transfers, backups and recovery for both frontends. Link the CMake target `zealfs_core` or the installed static library. It has no GUI or console dependencies. The disk and session are represented by one opaque `zfs_disk` handle; each handle owns its image/device descriptor, temporary sector overlay and callbacks. Multiple handles are independent, with no global current disk or partition.
 
 ```c
-#include <zealfs.h>
+#include <disk_tool.h>
 
 int create_image(void)
 {
@@ -107,7 +107,7 @@ Ordinary device Apply opens the selected device for writing at commit time and f
 
 Disks/images are sector-aligned, from 512 bytes through 64 GiB. ZealFS partitions are 8 KiB–4 GiB; file sizes are limited by the existing v2 on-disk format. Public disk sizes, offsets, usage counters and transfer progress use 64-bit values, with large-file support enabled for ARM32 builds. Platform device backends reject non-512-byte logical sectors.
 
-The existing `zealfs_v2` engine remains private. Its on-disk layout is unchanged. GUI adapter structs in `disk.h` are presentation models, not part of this public API. Other frontends should call `zealfs.h` directly rather than depend on those structs.
+The existing `zealfs_v2` engine remains private. Its on-disk layout is unchanged. GUI adapter structs in `disk.h` are presentation models, not part of this public API. Other frontends should call `disk_tool.h` directly rather than depend on those structs.
 
 
 ## Merge and restore
@@ -131,4 +131,4 @@ Only `zfs_apply` commits either operation. Merge/restore request flush and readb
 - [src/ui/](../src/ui/): GUI frontend, including its [entry point](../src/ui/main.c), [disk adapter](../src/ui/disk.c), controls and Nuklear/Raylib integration.
 - [src/zealfs/](../src/zealfs/): shared filesystem operations, host I/O and platform device backends used by both frontends.
 
-The GUI adapter translates shared API data into presentation models. Platform-specific device discovery and access remain in the shared core, independently of either frontend.
+The GUI adapter translates shared API data into presentation models. GUI progress declarations live in `include/ui/progress.h`; they are internal to the frontend and are not part of the installed C API. Platform-specific device discovery and access remain in the shared core, independently of either frontend.

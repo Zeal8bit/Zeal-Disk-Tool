@@ -3,8 +3,14 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#ifndef ZEALFS_API_H
-#define ZEALFS_API_H
+#ifndef DISK_TOOL_H
+#define DISK_TOOL_H
+
+/* Shared Disk Tool API for the CLI and GUI. This layer owns image/device access,
+ * partition management, staged filesystem edits, transfers, backups and recovery.
+ * It builds higher-level operations on the private ZealFS v2 engine and returns
+ * frontend-independent data and errors. Presentation and user interaction belong
+ * to the caller; this API has no GUI or console dependencies. */
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>

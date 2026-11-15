@@ -51,7 +51,7 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(zealfs_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 install(TARGETS zealfs_core ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
-install(FILES include/zealfs.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(FILES include/disk_tool.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(FILES README.md LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
 install(DIRECTORY docs md_imgs DESTINATION ${CMAKE_INSTALL_DOCDIR})
 

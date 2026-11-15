@@ -5,7 +5,7 @@
  */
 #ifndef ZFS_INTERNAL_H
 #define ZFS_INTERNAL_H
-#include "zealfs.h"
+#include "disk_tool.h"
 #include <stdio.h>
 /* Scratch bytes per streamed file/image transfer, not an on-disk format limit.
  * Comparisons may hold two buffers at once. Keep sector transfers aligned when

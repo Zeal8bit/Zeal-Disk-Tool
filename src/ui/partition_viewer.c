@@ -13,8 +13,9 @@
 #include "ui/statusbar.h"
 #include "ui/menubar.h"
 #include "ui/partition_viewer.h"
+#include "ui/progress.h"
 #include "ui/tinyfiledialogs.h"
-#include "zealfs.h"
+#include "disk_tool.h"
 
 #define MAX_PATH_LENGTH 512
 #define MAX_ENTRIES     2048 // 64KB pages / 32

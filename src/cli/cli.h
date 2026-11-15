@@ -6,7 +6,7 @@
 #ifndef ZDT_CLI_H
 #define ZDT_CLI_H
 /* Private frontend types. Disk and filesystem behavior belongs to zealfs_core. */
-#include "zealfs.h"
+#include "disk_tool.h"
 #define CLI_MAX_ARGS 64
 #define CLI_LINE_CAPACITY 8192
 #define CLI_HISTORY_LIMIT 32

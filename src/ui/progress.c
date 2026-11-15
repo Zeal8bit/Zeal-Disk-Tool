@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#include "disk.h"
+#include "ui/progress.h"
 #ifdef _WIN32
 #include <windows.h>
 // for Progress Bar
