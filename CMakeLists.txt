@@ -82,7 +82,11 @@ if(ZEALFS_BUILD_GUI)
     endif()
     # Include platform-specific options
     if(APPLE)
-        target_link_libraries(zeal_disk_tool PRIVATE "-framework Cocoa" "-framework IOKit" "-framework OpenGL")
+        target_link_libraries(zeal_disk_tool PRIVATE
+            "-framework Cocoa"
+            "-framework IOKit"
+            "-framework OpenGL"
+            "-framework QuartzCore")
         include(packages/darwin.cmake)
         add_custom_target(gui_package DEPENDS mac_app)
     elseif(WIN32)
