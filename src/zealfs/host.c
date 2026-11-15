@@ -23,7 +23,8 @@ static wchar_t* wide(const char* s)
 
 bool zfs_host_resolve(const char* path, char* out, size_t capacity)
 {
-    wchar_t *p = wide(path), full[ZFS_PATH_MAX];
+    wchar_t* p = wide(path);
+    wchar_t full[ZFS_PATH_MAX];
     DWORD n = p ? GetFullPathNameW(p, ZFS_PATH_MAX, full, NULL) : 0;
     free(p);
     return n && n < ZFS_PATH_MAX && WideCharToMultiByte(CP_UTF8, 0, full, -1, out, (int) capacity, NULL, NULL) > 0;
@@ -44,7 +45,8 @@ bool zfs_host_free_space(const char* path, uint64_t* bytes)
         return false;
     }
     strcpy(parent, path);
-    char *slash = strrchr(parent, '\\'), *forward = strrchr(parent, '/');
+    char* slash = strrchr(parent, '\\');
+    char* forward = strrchr(parent, '/');
     if (forward && (!slash || forward > slash)) {
         slash = forward;
     }
@@ -64,7 +66,8 @@ bool zfs_host_free_space(const char* path, uint64_t* bytes)
 
 FILE* zfs_host_open(const char* path, const char* mode)
 {
-    wchar_t *p = wide(path), *m = wide(mode);
+    wchar_t* p = wide(path);
+    wchar_t* m = wide(mode);
     FILE* f = p && m ? _wfopen(p, m) : NULL;
     free(p);
     free(m);
@@ -97,15 +100,25 @@ int zfs_host_sync(FILE* f)
 FILE* zfs_temp_sibling(const char* path, char* out, size_t capacity)
 {
     for (unsigned attempt = 0; attempt < 100; ++attempt) {
-        if (snprintf(out, capacity, "%s.zealfs-%lu-%lu-%llu-%u.tmp", path, GetCurrentProcessId(), GetCurrentThreadId(),
-                     (unsigned long long) GetTickCount64(), attempt) >= (int) capacity) {
+        if (snprintf(out,
+                     capacity,
+                     "%s.zealfs-%lu-%lu-%llu-%u.tmp",
+                     path,
+                     GetCurrentProcessId(),
+                     GetCurrentThreadId(),
+                     (unsigned long long) GetTickCount64(),
+                     attempt) >= (int) capacity) {
             return NULL;
         }
         wchar_t* p = wide(out);
-        HANDLE handle =
-            p ? CreateFileW(p, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                            NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL)
-              : INVALID_HANDLE_VALUE;
+        HANDLE handle = p ? CreateFileW(p,
+                                        GENERIC_READ | GENERIC_WRITE,
+                                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                        NULL,
+                                        CREATE_NEW,
+                                        FILE_ATTRIBUTE_NORMAL,
+                                        NULL)
+                          : INVALID_HANDLE_VALUE;
         DWORD error = GetLastError();
         int fd = handle != INVALID_HANDLE_VALUE ? _open_osfhandle((intptr_t) handle, _O_RDWR | _O_BINARY) : -1;
         if (fd < 0 && handle != INVALID_HANDLE_VALUE) {
@@ -134,7 +147,8 @@ FILE* zfs_temp_sibling(const char* path, char* out, size_t capacity)
 
 int zfs_host_publish(const char* temporary, const char* path, bool overwrite)
 {
-    wchar_t *a = wide(temporary), *b = wide(path);
+    wchar_t* a = wide(temporary);
+    wchar_t* b = wide(path);
     /* ReplaceFile opens the replacement without sharing, which conflicts with
      * the retained/locked image handle. Same-volume rename permits that handle
      * to stay open with FILE_SHARE_DELETE through publication. */
@@ -311,7 +325,8 @@ zfs_status zfs_host_kind(const char* path, zfs_host_type* type, zfs_error* e)
     if (!p) {
         return zfs_error_set(e, ZFS_INVALID, "Invalid UTF-8 host path");
     }
-    DWORD attrs = GetFileAttributesW(p), failure = GetLastError();
+    DWORD attrs = GetFileAttributesW(p);
+    DWORD failure = GetLastError();
     free(p);
     if (attrs == INVALID_FILE_ATTRIBUTES) {
         if (failure != ERROR_FILE_NOT_FOUND && failure != ERROR_PATH_NOT_FOUND) {
@@ -327,8 +342,11 @@ zfs_status zfs_host_kind(const char* path, zfs_host_type* type, zfs_error* e)
     struct stat st;
     if (lstat(path, &st)) {
         if (errno != ENOENT) {
-            return zfs_error_set(e, errno == EACCES ? ZFS_PERMISSION : ZFS_IO,
-                                 "Cannot inspect export destination %s: %s", path, strerror(errno));
+            return zfs_error_set(e,
+                                 errno == EACCES ? ZFS_PERMISSION : ZFS_IO,
+                                 "Cannot inspect export destination %s: %s",
+                                 path,
+                                 strerror(errno));
         }
         *type = ZFS_HOST_MISSING;
     } else {
@@ -347,18 +365,23 @@ static zfs_status make_directory(const char* path, zfs_error* e)
     }
     DWORD attrs = GetFileAttributesW(p);
     bool directory = attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY);
-    int r = directory ? 0 : _wmkdir(p), failure = errno;
+    int r = directory ? 0 : _wmkdir(p);
+    int failure = errno;
     free(p);
 #else
     struct stat st;
     bool directory = !stat(path, &st) && S_ISDIR(st.st_mode);
-    int r = directory ? 0 : mkdir(path, 0777), failure = errno;
+    int r = directory ? 0 : mkdir(path, 0777);
+    int failure = errno;
 #endif
     if (!r) {
         return ZFS_OK;
     }
-    return zfs_error_set(e, failure == EACCES || failure == EPERM ? ZFS_PERMISSION : ZFS_IO,
-                         "Cannot create host directory %s: %s", path, strerror(failure));
+    return zfs_error_set(e,
+                         failure == EACCES || failure == EPERM ? ZFS_PERMISSION : ZFS_IO,
+                         "Cannot create host directory %s: %s",
+                         path,
+                         strerror(failure));
 }
 
 static bool separator(char c)
@@ -430,7 +453,8 @@ static const char* next_character(const char* text)
 /* Match only filename components, consistently on every host. */
 bool zfs_wildcard_match(const char* pattern, const char* name)
 {
-    const char *star = NULL, *retry = NULL;
+    const char* star = NULL;
+    const char* retry = NULL;
     if (*name == '.' && *pattern != '.') {
         return false;
     }
@@ -446,7 +470,8 @@ bool zfs_wildcard_match(const char* pattern, const char* name)
             ++name;
         } else if (star && *retry) {
             pattern = star;
-            name = retry = next_character(retry);
+            retry = next_character(retry);
+            name = retry;
         } else {
             return false;
         }
@@ -521,8 +546,14 @@ zfs_status zfs_host_expand(const char* pattern, char*** paths, size_t* count, zf
         if (entry.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_DEVICE)) {
             continue;
         }
-        if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, entry.cFileName, -1, path + prefix,
-                                 (int) (sizeof(path) - prefix), NULL, NULL)) {
+        if (!WideCharToMultiByte(CP_UTF8,
+                                 WC_ERR_INVALID_CHARS,
+                                 entry.cFileName,
+                                 -1,
+                                 path + prefix,
+                                 (int) (sizeof(path) - prefix),
+                                 NULL,
+                                 NULL)) {
             s = zfs_error_set(e, ZFS_INVALID, "Import source path is too long or cannot be decoded");
             break;
         }
@@ -538,7 +569,9 @@ zfs_status zfs_host_expand(const char* pattern, char*** paths, size_t* count, zf
 #else
     DIR* directory = opendir(prefix ? path : ".");
     if (!directory) {
-        return zfs_error_set(e, errno == EACCES ? ZFS_PERMISSION : ZFS_IO, "Cannot list import source directory: %s",
+        return zfs_error_set(e,
+                             errno == EACCES ? ZFS_PERMISSION : ZFS_IO,
+                             "Cannot list import source directory: %s",
                              pattern);
     }
     for (;;) {

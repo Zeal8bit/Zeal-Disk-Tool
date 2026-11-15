@@ -39,13 +39,18 @@ typedef struct {
 typedef struct {
     bool active;
     uint8_t type;
-    uint32_t start_lba, sectors;
+    uint32_t start_lba;
+    uint32_t sectors;
 } zfs_partition;
 
 typedef struct {
     char path[ZFS_PATH_MAX];
     uint64_t size;
-    bool image, has_mbr, pending, new_image, failed;
+    bool image;
+    bool has_mbr;
+    bool pending;
+    bool new_image;
+    bool failed;
     zfs_partition partitions[ZFS_MAX_PARTITIONS];
 } zfs_info;
 
@@ -53,7 +58,12 @@ typedef struct {
     char name[ZFS_NAME_MAX + 1];
     bool directory;
     uint32_t size;
-    unsigned year, month, day, hour, minute, second;
+    unsigned year;
+    unsigned month;
+    unsigned day;
+    unsigned hour;
+    unsigned minute;
+    unsigned second;
 } zfs_entry;
 
 /* Callbacks are synchronous, optional, and must not reenter the session. */
@@ -123,14 +133,27 @@ const char* zfs_status_string(zfs_status status);
 typedef struct zfs_merge_plan zfs_merge_plan;
 
 typedef struct {
-    char source[ZFS_PATH_MAX], target[ZFS_PATH_MAX], backup[ZFS_PATH_MAX];
-    int source_partition, target_partition;
-    uint64_t files_added, files_replaced, files_unchanged, files_preserved;
-    uint64_t directories_created, directories_merged, directories_preserved;
-    uint64_t bytes_copied, backup_bytes;
+    char source[ZFS_PATH_MAX];
+    char target[ZFS_PATH_MAX];
+    char backup[ZFS_PATH_MAX];
+    int source_partition;
+    int target_partition;
+    uint64_t files_added;
+    uint64_t files_replaced;
+    uint64_t files_unchanged;
+    uint64_t files_preserved;
+    uint64_t directories_created;
+    uint64_t directories_merged;
+    uint64_t directories_preserved;
+    uint64_t bytes_copied;
+    uint64_t backup_bytes;
     char** conflicts;
     size_t conflict_count;
-    bool restore, noop, backup_created, staged, applied;
+    bool restore;
+    bool noop;
+    bool backup_created;
+    bool staged;
+    bool applied;
 } zfs_merge_report;
 
 zfs_status zfs_merge_prepare(zfs_disk* source, int source_partition, zfs_disk* target, int target_partition,

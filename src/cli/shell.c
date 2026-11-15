@@ -11,7 +11,8 @@
  * when escaping a quote inside a quoted token. No shell execution or expansion. */
 static int tokenize(char* line, char** args)
 {
-    char *read = line, *write = line;
+    char* read = line;
+    char* write = line;
     int count = 0;
     while (*read) {
         while (isspace((unsigned char) *read)) {

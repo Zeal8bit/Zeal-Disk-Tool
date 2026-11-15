@@ -25,7 +25,8 @@ zfs_status zfs_discover(zfs_info* out, size_t capacity, size_t* count, zfs_error
             strncmp(name, "vd", 2)) {
             continue;
         }
-        char path[ZFS_PATH_MAX], partition[ZFS_PATH_MAX];
+        char path[ZFS_PATH_MAX];
+        char partition[ZFS_PATH_MAX];
         snprintf(partition, sizeof(partition), "/sys/class/block/%s/partition", name);
         if (access(partition, F_OK) == 0 || strstr(name, "boot") || strstr(name, "rpmb")) {
             continue;

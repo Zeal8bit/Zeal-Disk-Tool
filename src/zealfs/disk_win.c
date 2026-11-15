@@ -9,15 +9,23 @@
 static zfs_status win_error(zfs_error* e, const char* operation)
 {
     DWORD code = GetLastError();
-    return zfs_error_set(e, code == ERROR_ACCESS_DENIED ? ZFS_PERMISSION : ZFS_IO, "%s failed (Windows error %lu)",
-                         operation, (unsigned long) code);
+    return zfs_error_set(e,
+                         code == ERROR_ACCESS_DENIED ? ZFS_PERMISSION : ZFS_IO,
+                         "%s failed (Windows error %lu)",
+                         operation,
+                         (unsigned long) code);
 }
 
 zfs_status zfs_native_open(const char* path, bool writing, zfs_native* fd, uint64_t* size, zfs_error* e)
 {
     /* Device paths are ASCII identifiers, not host file paths. */
-    *fd = CreateFileA(path, GENERIC_READ | (writing ? GENERIC_WRITE : 0), FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
-                      OPEN_EXISTING, 0, NULL);
+    *fd = CreateFileA(path,
+                      GENERIC_READ | (writing ? GENERIC_WRITE : 0),
+                      FILE_SHARE_READ | FILE_SHARE_WRITE,
+                      NULL,
+                      OPEN_EXISTING,
+                      0,
+                      NULL);
     if (*fd == INVALID_HANDLE_VALUE) {
         return win_error(e, "Open device");
     }
@@ -44,7 +52,8 @@ static zfs_status io(zfs_native fd, uint64_t offset, void* data, size_t size, bo
         return win_error(e, "Device seek");
     }
     while (size) {
-        DWORD n = 0, chunk = size > 1048576 ? 1048576 : (DWORD) size;
+        DWORD n = 0;
+        DWORD chunk = size > 1048576 ? 1048576 : (DWORD) size;
         BOOL ok = writing ? WriteFile(fd, data, chunk, &n, NULL) : ReadFile(fd, data, chunk, &n, NULL);
         if (!ok || n != chunk) {
             return win_error(e, writing ? "Device write" : "Device read");
@@ -101,7 +110,8 @@ zfs_status zfs_discover(zfs_info* out, size_t capacity, size_t* count, zfs_error
 
 bool zfs_native_same(zfs_native a, zfs_native b)
 {
-    STORAGE_DEVICE_NUMBER x, y;
+    STORAGE_DEVICE_NUMBER x;
+    STORAGE_DEVICE_NUMBER y;
     DWORD n;
     return DeviceIoControl(a, IOCTL_STORAGE_GET_DEVICE_NUMBER, NULL, 0, &x, sizeof(x), &n, NULL) &&
            DeviceIoControl(b, IOCTL_STORAGE_GET_DEVICE_NUMBER, NULL, 0, &y, sizeof(y), &n, NULL) &&
@@ -140,8 +150,14 @@ static zfs_status unmounted(HANDLE disk, zfs_error* e)
             unsigned char bytes[65536];
         } buffer;
 
-        BOOL ok = DeviceIoControl(h, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, NULL, 0, buffer.bytes, sizeof(buffer.bytes),
-                                  &n, NULL);
+        BOOL ok = DeviceIoControl(h,
+                                  IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
+                                  NULL,
+                                  0,
+                                  buffer.bytes,
+                                  sizeof(buffer.bytes),
+                                  &n,
+                                  NULL);
         DWORD code = ok ? ERROR_SUCCESS : GetLastError();
         CloseHandle(h);
         if (!ok) {
@@ -201,7 +217,8 @@ zfs_status zfs_native_guard(zfs_native* fd, const char* path, bool image, bool w
     if (s) {
         return s;
     }
-    STORAGE_DEVICE_NUMBER before, after;
+    STORAGE_DEVICE_NUMBER before;
+    STORAGE_DEVICE_NUMBER after;
     DWORD n;
     if (!DeviceIoControl(*fd, IOCTL_STORAGE_GET_DEVICE_NUMBER, NULL, 0, &before, sizeof(before), &n, NULL)) {
         return win_error(e, "Identify device");
@@ -210,7 +227,9 @@ zfs_status zfs_native_guard(zfs_native* fd, const char* path, bool image, bool w
     *fd = CreateFileA(path, GENERIC_READ | (writing ? GENERIC_WRITE : 0), 0, NULL, OPEN_EXISTING, 0, NULL);
     if (*fd == INVALID_HANDLE_VALUE) {
         return zfs_error_set(
-            e, ZFS_BUSY, "Cannot exclusively open device; unmount it, close other applications, and check permissions");
+            e,
+            ZFS_BUSY,
+            "Cannot exclusively open device; unmount it, close other applications, and check permissions");
     }
     if (!DeviceIoControl(*fd, IOCTL_STORAGE_GET_DEVICE_NUMBER, NULL, 0, &after, sizeof(after), &n, NULL) ||
         before.DeviceNumber != after.DeviceNumber || before.DeviceType != after.DeviceType) {

@@ -63,11 +63,19 @@ static void print_info(const cli_options* o, const zfs_info* info, zfs_disk* dis
         json_string(info->path);
         printf(",\"image\":%s,\"size\":%" PRIu64
                ",\"mbr\":%s,\"pending\":%s,\"new_image\":%s,\"failed\":%s,\"partitions\":[",
-               json_bool(info->image), info->size, json_bool(info->has_mbr), json_bool(info->pending),
-               json_bool(info->new_image), json_bool(info->failed));
+               json_bool(info->image),
+               info->size,
+               json_bool(info->has_mbr),
+               json_bool(info->pending),
+               json_bool(info->new_image),
+               json_bool(info->failed));
     } else {
-        printf("%s (%s, %" PRIu64 " bytes)\nMBR: %s  Pending: %s%s\n", info->path, info->image ? "image" : "device",
-               info->size, json_bool(info->has_mbr), json_bool(info->pending),
+        printf("%s (%s, %" PRIu64 " bytes)\nMBR: %s  Pending: %s%s\n",
+               info->path,
+               info->image ? "image" : "device",
+               info->size,
+               json_bool(info->has_mbr),
+               json_bool(info->pending),
                info->failed ? "  FAILED: reopen required" : "");
     }
     bool comma = false;
@@ -76,20 +84,27 @@ static void print_info(const cli_options* o, const zfs_info* info, zfs_disk* dis
         if (!p->active) {
             continue;
         }
-        uint64_t available = 0, total = 0;
+        uint64_t available = 0;
+        uint64_t total = 0;
         bool usage = disk && zfs_usage(disk, i, &available, &total, NULL) == ZFS_OK;
         if (o->json) {
             if (comma) {
                 putchar(',');
             }
-            printf("{\"partition\":%d,\"type\":%u,\"start_lba\":%u,\"sectors\":%u", i + 1, p->type, p->start_lba,
+            printf("{\"partition\":%d,\"type\":%u,\"start_lba\":%u,\"sectors\":%u",
+                   i + 1,
+                   p->type,
+                   p->start_lba,
                    p->sectors);
             if (usage) {
                 printf(",\"free_bytes\":%" PRIu64 ",\"total_bytes\":%" PRIu64, available, total);
             }
             putchar('}');
         } else {
-            printf("  %d  type 0x%02x  LBA %u  %" PRIu64 " bytes", i + 1, p->type, p->start_lba,
+            printf("  %d  type 0x%02x  LBA %u  %" PRIu64 " bytes",
+                   i + 1,
+                   p->type,
+                   p->start_lba,
                    (uint64_t) p->sectors * 512);
             if (usage) {
                 printf("  free %" PRIu64 "/%" PRIu64, available, total);
@@ -144,10 +159,25 @@ void cli_print_entries(const cli_options* o, const zfs_entry* entries, size_t co
             printf("{\"name\":");
             json_string(p->name);
             printf(",\"directory\":%s,\"size\":%u,\"modified\":\"%04u-%02u-%02uT%02u:%02u:%02u\"}",
-                   json_bool(p->directory), p->size, p->year, p->month, p->day, p->hour, p->minute, p->second);
+                   json_bool(p->directory),
+                   p->size,
+                   p->year,
+                   p->month,
+                   p->day,
+                   p->hour,
+                   p->minute,
+                   p->second);
         } else {
-            printf("%-17s %10u  %04u-%02u-%02u %02u:%02u:%02u  %s\n", p->name, p->size, p->year, p->month, p->day,
-                   p->hour, p->minute, p->second, p->directory ? "directory" : "file");
+            printf("%-17s %10u  %04u-%02u-%02u %02u:%02u:%02u  %s\n",
+                   p->name,
+                   p->size,
+                   p->year,
+                   p->month,
+                   p->day,
+                   p->hour,
+                   p->minute,
+                   p->second,
+                   p->directory ? "directory" : "file");
         }
     }
     if (o->json) {
@@ -157,8 +187,12 @@ void cli_print_entries(const cli_options* o, const zfs_entry* entries, size_t co
 
 void cli_print_summary(const cli_options* o, const zfs_info* info, bool creating)
 {
-    fprintf(stderr, "%s: %s staged on %s (%" PRIu64 " bytes).\n", o->argv[0], creating ? "image creation" : "change",
-            info->path, info->size);
+    fprintf(stderr,
+            "%s: %s staged on %s (%" PRIu64 " bytes).\n",
+            o->argv[0],
+            creating ? "image creation" : "change",
+            info->path,
+            info->size);
 }
 
 void cli_recovery_notice(zfs_disk* disk)
@@ -167,8 +201,10 @@ void cli_recovery_notice(zfs_disk* disk)
     if (!backup) {
         return;
     }
-    fprintf(stderr, "Backup retained: %s\nReopen the target, then use restore --from-image BACKUP --partition %d.\n",
-            backup, zfs_recovery_partition(disk) + 1);
+    fprintf(stderr,
+            "Backup retained: %s\nReopen the target, then use restore --from-image BACKUP --partition %d.\n",
+            backup,
+            zfs_recovery_partition(disk) + 1);
 }
 
 int cli_transfer_report(const cli_options* o, const zfs_merge_report* r, const char* state, int exit_code,
@@ -186,18 +222,28 @@ int cli_transfer_report(const cli_options* o, const zfs_merge_report* r, const c
         json_string(r->source);
         printf(",\"target\":");
         json_string(r->target);
-        printf(",\"source_partition\":%d,\"target_partition\":%d,\"backup_path\":", r->source_partition + 1,
+        printf(",\"source_partition\":%d,\"target_partition\":%d,\"backup_path\":",
+               r->source_partition + 1,
                r->target_partition + 1);
         json_string(r->backup);
         printf(",\"files_added\":%" PRIu64 ",\"files_replaced\":%" PRIu64 ",\"files_unchanged\":%" PRIu64
                ",\"files_preserved\":%" PRIu64,
-               r->files_added, r->files_replaced, r->files_unchanged, r->files_preserved);
+               r->files_added,
+               r->files_replaced,
+               r->files_unchanged,
+               r->files_preserved);
         printf(",\"directories_created\":%" PRIu64 ",\"directories_merged\":%" PRIu64
                ",\"directories_preserved\":%" PRIu64,
-               r->directories_created, r->directories_merged, r->directories_preserved);
+               r->directories_created,
+               r->directories_merged,
+               r->directories_preserved);
         printf(",\"bytes_copied\":%" PRIu64 ",\"backup_bytes\":%" PRIu64
                ",\"backup_created\":%s,\"noop\":%s,\"staged\":%s,\"applied\":%s,\"conflicts\":[",
-               r->bytes_copied, r->backup_bytes, json_bool(r->backup_created), json_bool(r->noop), json_bool(r->staged),
+               r->bytes_copied,
+               r->backup_bytes,
+               json_bool(r->backup_created),
+               json_bool(r->noop),
+               json_bool(r->staged),
                json_bool(r->applied));
         for (size_t i = 0; i < r->conflict_count; ++i) {
             if (i) {
@@ -216,7 +262,11 @@ int cli_transfer_report(const cli_options* o, const zfs_merge_report* r, const c
         puts("}");
     } else {
         printf("%s: %s\nFiles: %" PRIu64 " added, %" PRIu64 " replaced, %" PRIu64 " unchanged, %" PRIu64 " preserved\n",
-               r->restore ? "Restore" : "Merge", state, r->files_added, r->files_replaced, r->files_unchanged,
+               r->restore ? "Restore" : "Merge",
+               state,
+               r->files_added,
+               r->files_replaced,
+               r->files_unchanged,
                r->files_preserved);
         for (size_t i = 0; i < r->conflict_count; ++i) {
             printf("Type conflict: %s\n", r->conflicts[i]);

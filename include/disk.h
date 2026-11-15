@@ -23,32 +23,36 @@
 
 typedef enum {
     ERR_SUCCESS,
-    ERR_NOT_ADMIN,  /* Windows   */
-    ERR_NOT_ROOT,   /* Linux/Mac */
+    ERR_NOT_ADMIN, /* Windows   */
+    ERR_NOT_ROOT,  /* Linux/Mac */
     ERR_INVALID
 } disk_err_t;
 
 typedef struct {
     bool active;
     uint8_t type;
-    uint32_t start_lba, size_sectors;
+    uint32_t start_lba;
+    uint32_t size_sectors;
 } partition_t;
 
 typedef struct {
-    char name[ZFS_PATH_MAX], path[ZFS_PATH_MAX], label[DISK_LABEL_LEN];
+    char name[ZFS_PATH_MAX];
+    char path[ZFS_PATH_MAX];
+    char label[DISK_LABEL_LEN];
     uint64_t size_bytes;
-    bool valid, is_image;
+    bool valid;
+    bool is_image;
     /* Original MBR */
     bool has_mbr;
     /* Staged changes, to be applied */
     bool has_staged_changes;
-    partition_t partitions[4], staged_partitions[4];
+    partition_t partitions[4];
+    partition_t staged_partitions[4];
     int free_part_idx;
     zfs_disk* handle;
     unsigned revision;
     uint32_t allocation_alignment;
 } disk_info_t;
-
 
 /**
  * @brief Type for the disks list state
@@ -91,7 +95,6 @@ static inline const char* disk_get_basename(const char* path)
 #endif
     return last_slash ? last_slash + 1 : path;
 }
-
 
 /**
  * ============================================================================
@@ -175,4 +178,4 @@ void disk_update_progress_bar(int percent);
  */
 void disk_destroy_progress_bar(void);
 
-#endif // DISK_H
+#endif  // DISK_H

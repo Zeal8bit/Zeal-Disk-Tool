@@ -139,10 +139,10 @@ See the [shared C API guide](API.md) for embedding the library.
 
 ## C formatting
 
-The repository's [.clang-format](../.clang-format) follows the existing C conventions: four-space indentation, function braces on a separate line, attached control-flow braces, and pointer stars attached to the type. Use clang-format 15 or newer for the shared core, frontend code and C tests. For example, from the repository root:
+The repository's [.clang-format](../.clang-format) follows the existing C conventions: four-space indentation, function braces on a separate line, attached control-flow braces, and pointer stars attached to the type. Use clang-format 18 or newer for the shared core, frontend code and C tests. For example, from the repository root:
 
 ```sh
 clang-format --style=file -i src/cli/args.c
 ```
 
-For changes to existing files, format the edited sections. Keep bundled third-party headers and untouched renderer code in their existing format.
+For changes to existing files, format the edited sections. The `.clang-format-ignore` file excludes bundled third-party code and generated image data; `clang-format off/on` preserves the aligned GUI table. Split declarations manually and use trailing commas to keep initializer entries on separate lines.

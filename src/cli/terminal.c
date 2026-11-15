@@ -29,9 +29,11 @@ enum {
     KEY_IGNORE
 };
 #ifdef _WIN32
-static DWORD input_mode, output_mode;
+static DWORD input_mode;
+static DWORD output_mode;
 static UINT output_codepage;
-static HANDLE input_handle, output_handle;
+static HANDLE input_handle;
+static HANDLE output_handle;
 
 static bool editing_begin(void)
 {
@@ -71,7 +73,8 @@ static int columns(void)
 static int read_key(void)
 {
     static unsigned char encoded[4];
-    static int at, count;
+    static int at;
+    static int count;
     if (at < count) {
         return encoded[at++];
     }
@@ -111,7 +114,8 @@ static int read_key(void)
     return count ? encoded[at++] : KEY_IGNORE;
 }
 #else
-static struct termios saved_mode, edit_mode;
+static struct termios saved_mode;
+static struct termios edit_mode;
 static const int signals[] = {SIGINT, SIGTERM, SIGHUP, SIGQUIT, SIGTSTP};
 static struct sigaction saved_signals[5];
 static volatile sig_atomic_t active;
@@ -123,7 +127,8 @@ static void interrupted(int number)
         if (signals[i] == number) {
             struct sigaction handler;
             sigaction(number, &saved_signals[i], &handler);
-            sigset_t unblocked, blocked;
+            sigset_t unblocked;
+            sigset_t blocked;
             sigemptyset(&unblocked);
             sigaddset(&unblocked, number);
             sigprocmask(SIG_UNBLOCK, &unblocked, &blocked);
@@ -344,7 +349,9 @@ cli_input cli_readline(cli_history* h, char line[CLI_LINE_CAPACITY], bool termin
         return CLI_INPUT_OK;
     }
     char draft[CLI_LINE_CAPACITY] = {0};
-    size_t length = 0, cursor = 0, distance = 0;
+    size_t length = 0;
+    size_t cursor = 0;
+    size_t distance = 0;
     bool overflow = false;
     cli_input result = CLI_INPUT_OK;
     line[0] = 0;
@@ -379,7 +386,8 @@ cli_input cli_readline(cli_history* h, char line[CLI_LINE_CAPACITY], bool termin
                 continue;
             }
             strcpy(line, distance ? h->entries[(h->next + CLI_HISTORY_LIMIT - distance) % CLI_HISTORY_LIMIT] : draft);
-            length = cursor = strlen(line);
+            cursor = strlen(line);
+            length = cursor;
             overflow = false;
         } else if (key == KEY_LEFT) {
             cursor = previous(line, cursor);
@@ -390,7 +398,8 @@ cli_input cli_readline(cli_history* h, char line[CLI_LINE_CAPACITY], bool termin
         } else if (key == KEY_END || key == 5) {
             cursor = length;
         } else if (key == 21) {
-            length = cursor = 0;
+            cursor = 0;
+            length = 0;
             line[0] = 0;
             overflow = false;
         } else if ((key == 127 || key == 8) && cursor) {

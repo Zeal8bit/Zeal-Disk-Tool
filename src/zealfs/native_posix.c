@@ -17,8 +17,11 @@ zfs_status zfs_native_open(const char* path, bool write_access, zfs_native* fd, 
 {
     *fd = open(path, write_access ? O_RDWR : O_RDONLY);
     if (*fd < 0) {
-        return zfs_error_set(e, errno == EACCES || errno == EPERM ? ZFS_PERMISSION : ZFS_IO,
-                             "Cannot open device %s: %s", path, strerror(errno));
+        return zfs_error_set(e,
+                             errno == EACCES || errno == EPERM ? ZFS_PERMISSION : ZFS_IO,
+                             "Cannot open device %s: %s",
+                             path,
+                             strerror(errno));
     }
     /* Get the size of the disk, make sure it is not bigger than expected */
     struct stat st;
@@ -51,7 +54,10 @@ static zfs_status io(zfs_native fd, uint64_t offset, void* data, size_t size, bo
             continue;
         }
         if (n <= 0) {
-            return zfs_error_set(e, ZFS_IO, "Device %s failed: %s", writing ? "write" : "read",
+            return zfs_error_set(e,
+                                 ZFS_IO,
+                                 "Device %s failed: %s",
+                                 writing ? "write" : "read",
                                  n ? strerror(errno) : "short I/O");
         }
         data = (unsigned char*) data + n;
@@ -93,7 +99,8 @@ void zfs_native_close(zfs_native fd)
 #endif
 bool zfs_native_same(zfs_native a, zfs_native b)
 {
-    struct stat x, y;
+    struct stat x;
+    struct stat y;
     if (fstat(a, &x) || fstat(b, &y)) {
         return false;
     }
@@ -129,7 +136,8 @@ static zfs_status unmounted(zfs_native fd, const char* path, zfs_error* e)
 {
 #ifdef __APPLE__
     (void) fd;
-    char resolved[ZFS_PATH_MAX], block[ZFS_PATH_MAX];
+    char resolved[ZFS_PATH_MAX];
+    char block[ZFS_PATH_MAX];
     if (!realpath(path, resolved)) {
         return zfs_error_set(e, ZFS_BUSY, "Cannot identify device mounts");
     }
@@ -156,13 +164,16 @@ static zfs_status unmounted(zfs_native fd, const char* path, zfs_error* e)
     for (int i = 0; i < n; ++i) {
         const char* name = mounts[i].f_mntfromname;
         if (!strncmp(name, block, len) && (!name[len] || name[len] == 's')) {
-            return zfs_error_set(e, ZFS_BUSY,
-                                 "Device is mounted; unmount the entire disk first: diskutil unmountDisk %s", block);
+            return zfs_error_set(e,
+                                 ZFS_BUSY,
+                                 "Device is mounted; unmount the entire disk first: diskutil unmountDisk %s",
+                                 block);
         }
     }
 #else
     struct stat st;
-    char link[128], device[ZFS_PATH_MAX];
+    char link[128];
+    char device[ZFS_PATH_MAX];
     if (fstat(fd, &st)) {
         return zfs_error_set(e, ZFS_IO, "Cannot identify device");
     }
@@ -185,7 +196,8 @@ static zfs_status unmounted(zfs_native fd, const char* path, zfs_error* e)
     bool busy = false;
     size_t len = strlen(device);
     while (getline(&line, &capacity, mounts) >= 0) {
-        unsigned maj, min;
+        unsigned maj;
+        unsigned min;
         char mounted[ZFS_PATH_MAX];
         if (sscanf(line, "%*u %*u %u:%u", &maj, &min) != 2) {
             busy = true;
@@ -208,7 +220,8 @@ static zfs_status unmounted(zfs_native fd, const char* path, zfs_error* e)
     } else {
         struct dirent* entry;
         while ((entry = readdir(blocks))) {
-            char item[ZFS_PATH_MAX], resolved[ZFS_PATH_MAX];
+            char item[ZFS_PATH_MAX];
+            char resolved[ZFS_PATH_MAX];
             snprintf(item, sizeof(item), "/sys/class/block/%s", entry->d_name);
             if (realpath(item, resolved) && !strncmp(resolved, device, len) &&
                 (!resolved[len] || resolved[len] == '/') && has_holders(resolved)) {
@@ -220,7 +233,9 @@ static zfs_status unmounted(zfs_native fd, const char* path, zfs_error* e)
     }
     if (busy) {
         return zfs_error_set(
-            e, ZFS_BUSY, "Device is mounted or claimed; unmount all its partitions and close device mappings first: %s",
+            e,
+            ZFS_BUSY,
+            "Device is mounted or claimed; unmount all its partitions and close device mappings first: %s",
             path);
     }
 #endif
@@ -237,8 +252,10 @@ zfs_status zfs_native_guard(zfs_native* fd, const char* path, bool image, bool w
 #ifdef __linux__
         int exclusive = open(path, (writing ? O_RDWR : O_RDONLY) | O_EXCL);
         if (exclusive < 0) {
-            return zfs_error_set(e, errno == EBUSY ? ZFS_BUSY : ZFS_PERMISSION,
-                                 "Cannot exclusively open device; unmount it and check permissions: %s", path);
+            return zfs_error_set(e,
+                                 errno == EBUSY ? ZFS_BUSY : ZFS_PERMISSION,
+                                 "Cannot exclusively open device; unmount it and check permissions: %s",
+                                 path);
         }
         if (!zfs_native_same(*fd, exclusive) || flock(exclusive, LOCK_EX | LOCK_NB)) {
             close(exclusive);

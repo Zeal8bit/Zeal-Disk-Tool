@@ -37,20 +37,27 @@ static bool select_partition(zfs_disk* disk, int requested, bool raw_restore, in
         return true;
     }
     e->code = ZFS_INVALID;
-    snprintf(e->message, sizeof(e->message),
-             "%s has %d ZealFS partitions; choose --partition or --from-partition explicitly", info->path, count);
+    snprintf(e->message,
+             sizeof(e->message),
+             "%s has %d ZealFS partitions; choose --partition or --from-partition explicitly",
+             info->path,
+             count);
     return false;
 }
 
 int cli_transfer(cli_session* s, const cli_options* o, bool restore)
 {
     if (!o->source) {
-        return cli_failure(o, 2, "usage",
+        return cli_failure(o,
+                           2,
+                           "usage",
                            restore ? "restore requires --from-image BACKUP.img"
                                    : "merge requires --from-image PATH or --from-device PATH");
     }
     if (restore && (!o->source_image || o->backup || o->source_partition >= 0)) {
-        return cli_failure(o, 2, "usage",
+        return cli_failure(o,
+                           2,
+                           "usage",
                            "restore accepts a raw --from-image backup, without --backup or --from-partition");
     }
     if (zfs_get_info(s->disk)->pending) {
@@ -60,7 +67,9 @@ int cli_transfer(cli_session* s, const cli_options* o, bool restore)
     zfs_merge_report report = {0};
     zfs_merge_plan* plan = NULL;
     zfs_disk* source = NULL;
-    int tp = -1, sp = -1, result = 0;
+    int tp = -1;
+    int sp = -1;
+    int result = 0;
     if (!select_partition(s->disk, o->partition_set ? o->partition : -1, restore, &tp, &error)) {
         return cli_failure(o, 2, "usage", error.message);
     }
@@ -107,8 +116,12 @@ int cli_transfer(cli_session* s, const cli_options* o, bool restore)
     }
     fprintf(stderr,
             "Proposed %s for partition %d on %s: %llu added, %llu replaced, %llu unchanged, %llu preserved files.\n",
-            restore ? "restore" : "merge", tp + 1, report.target, (unsigned long long) report.files_added,
-            (unsigned long long) report.files_replaced, (unsigned long long) report.files_unchanged,
+            restore ? "restore" : "merge",
+            tp + 1,
+            report.target,
+            (unsigned long long) report.files_added,
+            (unsigned long long) report.files_replaced,
+            (unsigned long long) report.files_unchanged,
             (unsigned long long) report.files_preserved);
     if (!restore && o->backup) {
         fprintf(stderr, "Backup: %s (%llu bytes).\n", o->backup, (unsigned long long) report.backup_bytes);

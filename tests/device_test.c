@@ -8,7 +8,9 @@
 
 static unsigned char media[1024 * 1024];
 static unsigned writes;
-static bool deny_write, fail_write, fail_flush;
+static bool deny_write;
+static bool fail_write;
+static bool fail_flush;
 static zfs_error error;
 #define REQUIRE(value)                                                                                                 \
     do {                                                                                                               \

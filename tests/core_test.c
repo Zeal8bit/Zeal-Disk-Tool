@@ -60,7 +60,10 @@ int main(void)
     snprintf(directory, sizeof(directory), "/tmp/zealfs-test-XXXXXX");
     REQUIRE(mkdtemp(directory));
 #endif
-    char image[600], raw[600], exported[600], source[600];
+    char image[600];
+    char raw[600];
+    char exported[600];
+    char source[600];
     snprintf(image, sizeof(image), "%s/disk.img", directory);
     snprintf(raw, sizeof(raw), "%s/raw.img", directory);
     snprintf(exported, sizeof(exported), "%s/export.bin", directory);
@@ -131,7 +134,9 @@ int main(void)
     REQUIRE(hash(image) == original);
     OK(zfs_discard(d, &error));
     /* A failed large import must leave neither an entry nor partially allocated pages. */
-    uint64_t free_before, total, free_after;
+    uint64_t free_before;
+    uint64_t total;
+    uint64_t free_after;
     OK(zfs_usage(d, 0, &free_before, &total, &error));
     unsigned char* large = calloc(1, 1024 * 1024);
     REQUIRE(large);

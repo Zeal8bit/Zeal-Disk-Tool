@@ -11,7 +11,8 @@
 
 typedef struct {
     char entries[CLI_HISTORY_LIMIT][CLI_LINE_CAPACITY];
-    size_t count, next;
+    size_t count;
+    size_t next;
 } cli_history;
 
 typedef enum {
@@ -25,10 +26,18 @@ cli_input cli_readline(cli_history* history, char line[CLI_LINE_CAPACITY], bool 
 void cli_history_add(cli_history* history, const char* line);
 
 typedef struct {
-    const char *target, *source, *backup;
-    bool source_image, partition_set;
+    const char* target;
+    const char* source;
+    const char* backup;
+    bool source_image;
+    bool partition_set;
     int source_partition;
-    bool image, json, yes, dry_run, mbr, size_set;
+    bool image;
+    bool json;
+    bool yes;
+    bool dry_run;
+    bool mbr;
+    bool size_set;
     uint64_t size;
     uint32_t alignment;
     int partition;

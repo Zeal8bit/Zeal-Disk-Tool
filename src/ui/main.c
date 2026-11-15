@@ -65,13 +65,13 @@ static void draw_dashed_rect(struct nk_context* ctx, struct nk_rect rect, struct
     float y1 = rect.y + rect.h;
     for (float x = x0; x < x1; x += dash_length + space_length) {
         float end = NK_MIN(x + dash_length, x1);
-        nk_stroke_line(canvas, x, y0, end, y0, thickness, color); // top
-        nk_stroke_line(canvas, x, y1, end, y1, thickness, color); // bottom
+        nk_stroke_line(canvas, x, y0, end, y0, thickness, color);  // top
+        nk_stroke_line(canvas, x, y1, end, y1, thickness, color);  // bottom
     }
     for (float y = y0; y < y1; y += dash_length + space_length) {
         float end = NK_MIN(y + dash_length, y1);
-        nk_stroke_line(canvas, x0, y, x0, end, thickness, color); // left
-        nk_stroke_line(canvas, x1, y, x1, end, thickness, color); // right
+        nk_stroke_line(canvas, x0, y, x0, end, thickness, color);  // left
+        nk_stroke_line(canvas, x1, y, x1, end, thickness, color);  // right
     }
 }
 
@@ -146,50 +146,58 @@ static void ui_draw_disk(struct nk_context* ctx, const disk_info_t* disk, int* s
             /* Compute centered position */
             const float label_x = part_rect.x + (part_rect.w - text_width) / 2.0f;
             const float label_y = part_rect.y + (part_rect.h - text_height) / 2.0f;
-            nk_draw_text(canvas, nk_rect(label_x, label_y, text_width, text_height), label, strlen(label),
-                         ctx->style.font, NK_BLACK, NK_BLACK);
+            nk_draw_text(canvas,
+                         nk_rect(label_x, label_y, text_width, text_height),
+                         label,
+                         strlen(label),
+                         ctx->style.font,
+                         NK_BLACK,
+                         NK_BLACK);
         }
     }
 
     // Draw table header
     const float ratios[] = {
-        0.04f, // Color
-        0.05f, // Padding
-        0.15f, // Number
-        0.20f, // File System
-        0.15f, // Start address
-        0.15f, // Size
-        0.25f, // Padding
+        0.04f,  // Color
+        0.05f,  // Padding
+        0.15f,  // Number
+        0.20f,  // File System
+        0.15f,  // Start address
+        0.15f,  // Size
+        0.25f,  // Padding
     };
 
+    // clang-format off
     // Draw table header
     nk_layout_row(ctx, NK_DYNAMIC, 25, 7, ratios);
-    nk_label(ctx, "Color", NK_TEXT_CENTERED);
-    nk_label(ctx, " ", NK_TEXT_LEFT);
-    nk_label(ctx, "Partition", NK_TEXT_LEFT);
+    nk_label(ctx, "Color",              NK_TEXT_CENTERED);
+    nk_label(ctx, " ",                  NK_TEXT_LEFT);
+    nk_label(ctx, "Partition",          NK_TEXT_LEFT);
     nk_label(ctx, "File System (Type)", NK_TEXT_LEFT);
-    nk_label(ctx, "Start address", NK_TEXT_LEFT);
-    nk_label(ctx, "Size", NK_TEXT_CENTERED);
-    nk_label(ctx, " ", NK_TEXT_LEFT);
+    nk_label(ctx, "Start address",      NK_TEXT_LEFT);
+    nk_label(ctx, "Size",               NK_TEXT_CENTERED);
+    nk_label(ctx, " ",                  NK_TEXT_LEFT);
 
     /* Make all the elements' background transparent in the list */
     nk_style_push_color(ctx, &ctx->style.selectable.normal.data.color, NK_TRANSPARENT);
-    nk_style_push_color(ctx, &ctx->style.selectable.hover.data.color, NK_TRANSPARENT);
-    nk_style_push_color(ctx, &ctx->style.selectable.pressed.data.color, NK_TRANSPARENT);
+    nk_style_push_color(ctx, &ctx->style.selectable.hover.data.color,  NK_TRANSPARENT);
+    nk_style_push_color(ctx, &ctx->style.selectable.pressed.data.color,  NK_TRANSPARENT);
     nk_style_push_color(ctx, &ctx->style.selectable.normal_active.data.color, NK_TRANSPARENT);
-    nk_style_push_color(ctx, &ctx->style.selectable.hover_active.data.color, NK_TRANSPARENT);
-    nk_style_push_color(ctx, &ctx->style.selectable.pressed_active.data.color, NK_TRANSPARENT);
+    nk_style_push_color(ctx, &ctx->style.selectable.hover_active.data.color,  NK_TRANSPARENT);
+    nk_style_push_color(ctx, &ctx->style.selectable.pressed_active.data.color,  NK_TRANSPARENT);
 
     /* Show that an MBR is present (if that's the case) */
     if (disk->has_mbr) {
-        nk_label(ctx, " ", NK_TEXT_CENTERED);
-        nk_label(ctx, " ", NK_TEXT_LEFT);
-        nk_label(ctx, "-", NK_TEXT_LEFT);
-        nk_label(ctx, "MBR", NK_TEXT_LEFT);
-        nk_label(ctx, "", NK_TEXT_LEFT);
-        nk_label(ctx, "", NK_TEXT_CENTERED);
-        nk_label(ctx, " ", NK_TEXT_LEFT);
+        nk_label(ctx, " ",                  NK_TEXT_CENTERED);
+        nk_label(ctx, " ",                  NK_TEXT_LEFT);
+        nk_label(ctx, "-",                  NK_TEXT_LEFT);
+        nk_label(ctx, "MBR",                NK_TEXT_LEFT);
+        nk_label(ctx, "",                   NK_TEXT_LEFT);
+        nk_label(ctx, "",                   NK_TEXT_CENTERED);
+        nk_label(ctx, " ",                  NK_TEXT_LEFT);
     }
+
+    // clang-format on
 
     for (int i = 0; i < MAX_PART_COUNT; i++) {
         char buffer[256];
@@ -293,7 +301,10 @@ static void ui_apply_handle(struct nk_context* ctx, disk_info_t* disk)
             nk_label_wrap(ctx, "Apply changes to disk? This action is permanent and cannot be undone.");
             nk_layout_row_dynamic(ctx, 30, 2);
             if (nk_button_label(ctx, "Yes")) {
-                static popup_info_t result_info = {.title = "Apply changes", .msg = "Success!"};
+                static popup_info_t result_info = {
+                    .title = "Apply changes",
+                    .msg = "Success!",
+                };
                 result_info.msg = "Success!";
                 const char* error_str = disk_write_changes(disk);
                 if (error_str) {
@@ -418,7 +429,10 @@ static void ui_new_partition(struct nk_context* ctx, disk_info_t* disk)
             if (selected_size_kb < min_size_kb) {
                 ctx->style.edit.border_color = nk_rgb(255, 0, 0);
             }
-            nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, size_input, sizeof(size_input),
+            nk_edit_string_zero_terminated(ctx,
+                                           NK_EDIT_FIELD,
+                                           size_input,
+                                           sizeof(size_input),
                                            selected_unit == UNIT_KIB ? nk_filter_decimal : nk_filter_float);
             ctx->style.edit.border_color = border;
             const int new_selected_unit =
@@ -561,8 +575,10 @@ static void ui_new_image(struct nk_context* ctx, disk_list_state_t* state)
             popup_close(POPUP_NEWIMG);
             int new_index = disk_create_image(state, image_path, selected_size, selected_partition_table == 1);
             if (new_index == -1) {
-                static popup_info_t error_info = {.title = "Error",
-                                                  .msg = "Failed to create the disk image. Please try again."};
+                static popup_info_t error_info = {
+                    .title = "Error",
+                    .msg = "Failed to create the disk image. Please try again.",
+                };
                 popup_open(POPUP_MBR, 300, 140, &error_info);
             } else if (current_disk == NULL || !current_disk->has_staged_changes) {
                 /* Switch to thew newly created disk if the current one has no pending changes */
@@ -584,7 +600,8 @@ static void setup_window(int argc, char* argv[])
     InitWindow(MIN_WIN_WIDTH, MIN_WIN_HEIGHT, "Zeal Disk Tool " VERSION);
 
     // get current monitor details
-    int mw, mh;
+    int mw;
+    int mh;
     int monitor = GetCurrentMonitor();
     mw = GetMonitorWidth(monitor);
     mh = GetMonitorHeight(monitor);
@@ -612,10 +629,10 @@ static void setup_window(int argc, char* argv[])
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-g") == 0) {
             __declspec(dllimport) int __stdcall AllocConsole(void);
-            AllocConsole();                  // Allocate a new console window
-            freopen("CONOUT$", "w", stdout); // Redirect stdout to it
-            freopen("CONOUT$", "w", stderr); // Redirect stderr
-            freopen("CONIN$", "r", stdin);   // Optional: redirect stdin
+            AllocConsole();                   // Allocate a new console window
+            freopen("CONOUT$", "w", stdout);  // Redirect stdout to it
+            freopen("CONOUT$", "w", stderr);  // Redirect stderr
+            freopen("CONIN$", "r", stdin);    // Optional: redirect stdin
         }
     }
 #endif
@@ -641,7 +658,8 @@ static bool ui_can_quit(void)
             continue;
         }
         char message[1024];
-        snprintf(message, sizeof(message),
+        snprintf(message,
+                 sizeof(message),
                  "Pending changes on %.800s. Apply before quitting?\nYes: apply. No: discard. Cancel: keep editing.",
                  disk->name);
         int answer = tinyfd_messageBox("Unsaved changes", message, "yesnocancel", "question", 0);
@@ -714,8 +732,12 @@ int main(int argc, char* argv[])
     const int fontSize = 13;
     // Load the embedded font without relying on internal font-packing symbols
     // that shared Raylib libraries may not export for LoadFontFromNuklear.
-    Font font = LoadFontFromMemory(".ttf", RAYLIB_NUKLEAR_DEFAULT_FONT_NAME, RAYLIB_NUKLEAR_DEFAULT_FONT_SIZE, fontSize,
-                                   NULL, 95);
+    Font font = LoadFontFromMemory(".ttf",
+                                   RAYLIB_NUKLEAR_DEFAULT_FONT_NAME,
+                                   RAYLIB_NUKLEAR_DEFAULT_FONT_SIZE,
+                                   fontSize,
+                                   NULL,
+                                   95);
     ctx = InitNuklearEx(font, fontSize);
 
     ui_statusbar_print("Ready!");
@@ -732,13 +754,16 @@ int main(int argc, char* argv[])
         disk_list_state_t* state = disk_get_state();
         disk_info_t* current_disk = disk_get_current(state);
 
-        nk_style_push_style_item(ctx, &ctx->style.window.fixed_background,
+        nk_style_push_style_item(ctx,
+                                 &ctx->style.window.fixed_background,
                                  nk_style_item_color(nk_rgb(0x39, 0x39, 0x39)));
 
-        struct nk_rect disk_view_rect = {.x = 0,
-                                         .y = MENUBAR_HEIGHT,
-                                         .w = winWidth * 0.70f,
-                                         .h = winHeight - MENUBAR_HEIGHT - ui_statusbar_height(ctx)};
+        struct nk_rect disk_view_rect = {
+            .x = 0,
+            .y = MENUBAR_HEIGHT,
+            .w = winWidth * 0.70f,
+            .h = winHeight - MENUBAR_HEIGHT - ui_statusbar_height(ctx),
+        };
         if (nk_begin(ctx, "Disk partitioning", disk_view_rect, flags)) {
 
             /* Create the top row with the buttons and the disk selection */
@@ -796,9 +821,11 @@ int main(int argc, char* argv[])
                     state->selected_partition = -1;
                 } else {
                     state->selected_disk = former_disk;
-                    static popup_info_t info = {.title = "Cannot switch disk",
-                                                .msg = "The selected disk has unsaved changes. Please apply or discard "
-                                                       "them before switching disks."};
+                    static popup_info_t info = {
+                        .title = "Cannot switch disk",
+                        .msg = "The selected disk has unsaved changes. Please apply or discard "
+                               "them before switching disks.",
+                    };
                     popup_open(POPUP_MBR, 300, 140, &info);
                 }
             }

@@ -112,11 +112,14 @@ static zfs_status walk(zfs_disk* d, int part, char* path, char* host, bool direc
     }
     for (size_t i = 0; !s && i < count; ++i) {
         if (!safe_name(entries[i].name) || (i && same_name(entries[i - 1].name, entries[i].name))) {
-            s = zfs_error_set(e, ZFS_INVALID, "Filesystem names cannot be exported safely on this host: %s",
+            s = zfs_error_set(e,
+                              ZFS_INVALID,
+                              "Filesystem names cannot be exported safely on this host: %s",
                               entries[i].name);
             break;
         }
-        size_t source_length = strlen(path), host_length = strlen(host);
+        size_t source_length = strlen(path);
+        size_t host_length = strlen(host);
         bool root = !strcmp(path, "/");
         int n = snprintf(path + source_length, 512 - source_length, "%s%s", root ? "" : "/", entries[i].name);
         int m = snprintf(host + host_length, ZFS_PATH_MAX - host_length, "/%s", entries[i].name);
@@ -143,7 +146,9 @@ static zfs_status export_tree(zfs_disk* d, int part, const char* path, const cha
         return s;
     }
     /* Reuse one pair of path buffers at every depth to keep traversal stack use bounded. */
-    char source[512], destination[ZFS_PATH_MAX], pattern[512];
+    char source[512];
+    char destination[ZFS_PATH_MAX];
+    char pattern[512];
     strcpy(source, path);
     strcpy(destination, host);
     bool matching = strpbrk(path, "*?") != NULL;
@@ -159,7 +164,8 @@ static zfs_status export_tree(zfs_disk* d, int part, const char* path, const cha
             *slash = 0;
         }
     }
-    bool directory, exists = false;
+    bool directory;
+    bool exists = false;
     s = zfs_core_path_directory(d, part, source, &directory, e);
     if (s) {
         return s;

@@ -12,8 +12,16 @@
 #else
 #include <unistd.h>
 #endif
-static unsigned char media[131072], source_media[131072], original[131072], source_before[131072];
-static bool mounted, target_mounted, deny, corrupt, flush_failure, fail_after_sector;
+static unsigned char media[131072];
+static unsigned char source_media[131072];
+static unsigned char original[131072];
+static unsigned char source_before[131072];
+static bool mounted;
+static bool target_mounted;
+static bool deny;
+static bool corrupt;
+static bool flush_failure;
+static bool fail_after_sector;
 static unsigned writes;
 static zfs_error error;
 #define REQUIRE(x)                                                                                                     \

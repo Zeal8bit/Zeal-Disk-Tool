@@ -27,12 +27,31 @@ void disk_init_progress_bar(void)
     int centerX = winX + winWidth / 2;
     int centerY = winY + winHeight / 2;
 
-    hwndWindow =
-        CreateWindowEx(0, WC_DIALOG, "Copying file...", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, centerX - width / 2,
-                       centerY - height / 2, width, height, NULL, NULL, GetModuleHandle(NULL), NULL);
+    hwndWindow = CreateWindowEx(0,
+                                WC_DIALOG,
+                                "Copying file...",
+                                WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+                                centerX - width / 2,
+                                centerY - height / 2,
+                                width,
+                                height,
+                                NULL,
+                                NULL,
+                                GetModuleHandle(NULL),
+                                NULL);
 
-    hwndProgress = CreateWindowEx(0, PROGRESS_CLASS, NULL, WS_CHILD | WS_VISIBLE, 20, 20, 300, 20, hwndWindow, NULL,
-                                  GetModuleHandle(NULL), NULL);
+    hwndProgress = CreateWindowEx(0,
+                                  PROGRESS_CLASS,
+                                  NULL,
+                                  WS_CHILD | WS_VISIBLE,
+                                  20,
+                                  20,
+                                  300,
+                                  20,
+                                  hwndWindow,
+                                  NULL,
+                                  GetModuleHandle(NULL),
+                                  NULL);
 
     SendMessage(hwndProgress, PBM_SETRANGE, 0, MAKELPARAM(0, 100));
     SendMessage(hwndProgress, PBM_SETPOS, 0, 0);

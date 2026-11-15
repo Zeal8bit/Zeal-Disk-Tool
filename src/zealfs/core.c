@@ -26,18 +26,20 @@ typedef struct {
 
 const char* zfs_status_string(zfs_status s)
 {
-    static const char* names[] = {"success",
-                                  "invalid argument",
-                                  "I/O error",
-                                  "permission denied",
-                                  "not found",
-                                  "already exists",
-                                  "no space",
-                                  "out of memory",
-                                  "busy",
-                                  "corrupt filesystem",
-                                  "partial device write",
-                                  "type conflict"};
+    static const char* names[] = {
+        "success",
+        "invalid argument",
+        "I/O error",
+        "permission denied",
+        "not found",
+        "already exists",
+        "no space",
+        "out of memory",
+        "busy",
+        "corrupt filesystem",
+        "partial device write",
+        "type conflict",
+    };
     return (unsigned) s < sizeof(names) / sizeof(*names) ? names[s] : "unknown error";
 }
 
@@ -109,7 +111,10 @@ static zfs_status write_sector(zfs_disk* d, uint64_t sector, const void* buffer,
     if (!d->undo || sector >= d->info.size / SECTOR) {
         return zfs_error_set(e, ZFS_INVALID, "Write outside transaction or disk");
     }
-    undo_record record = {.sector = sector, .dirty = dirty(d, sector)};
+    undo_record record = {
+        .sector = sector,
+        .dirty = dirty(d, sector),
+    };
     zfs_status s = read_sector(d, sector, record.data, e);
     if (s) {
         return s;
@@ -136,7 +141,8 @@ static zfs_status bytes_io(zfs_disk* d, uint64_t address, void* buffer, size_t s
     unsigned char* p = buffer;
     while (size) {
         /* Check if address is aligned to SECTOR */
-        size_t offset = (size_t) (address % SECTOR), n = SECTOR - offset;
+        size_t offset = (size_t) (address % SECTOR);
+        size_t n = SECTOR - offset;
         if (n > size) {
             n = size;
         }
@@ -238,14 +244,24 @@ static zfs_status parse(zfs_disk* d, zfs_error* e)
     memset(d->info.partitions, 0, sizeof(d->info.partitions));
     if (!d->info.has_mbr) {
         if (sector[0] == 'Z' && sector[1] == 2) {
-            d->info.partitions[0] = (zfs_partition){true, 0x5a, 0, (uint32_t) (d->info.size / SECTOR)};
+            d->info.partitions[0] = (zfs_partition){
+                true,
+                0x5a,
+                0,
+                (uint32_t) (d->info.size / SECTOR),
+            };
         }
         return ZFS_OK;
     }
     for (unsigned i = 0; i < 4; ++i) {
         const unsigned char* p = sector + 446 + i * 16;
         zfs_partition* part = &d->info.partitions[i];
-        *part = (zfs_partition){(p[0] & 0x80) || p[4] || le32(p + 8) || le32(p + 12), p[4], le32(p + 8), le32(p + 12)};
+        *part = (zfs_partition){
+            (p[0] & 0x80) || p[4] || le32(p + 8) || le32(p + 12),
+            p[4],
+            le32(p + 8),
+            le32(p + 12),
+        };
         /* Be very conservative to make sure nothing is erased! */
         if (part->active && (!part->sectors || !part->start_lba ||
                              (uint64_t) part->start_lba + part->sectors > d->info.size / SECTOR)) {
@@ -457,13 +473,15 @@ zfs_status zfs_discard(zfs_disk* d, zfs_error* e)
 static bool file_identity(FILE* a, FILE* b)
 {
 #ifdef _WIN32
-    BY_HANDLE_FILE_INFORMATION x, y;
+    BY_HANDLE_FILE_INFORMATION x;
+    BY_HANDLE_FILE_INFORMATION y;
     return GetFileInformationByHandle((HANDLE) _get_osfhandle(_fileno(a)), &x) &&
            GetFileInformationByHandle((HANDLE) _get_osfhandle(_fileno(b)), &y) &&
            x.dwVolumeSerialNumber == y.dwVolumeSerialNumber && x.nFileIndexHigh == y.nFileIndexHigh &&
            x.nFileIndexLow == y.nFileIndexLow;
 #else
-    struct stat x, y;
+    struct stat x;
+    struct stat y;
     return !fstat(fileno(a), &x) && !fstat(fileno(b), &y) && x.st_dev == y.st_dev && x.st_ino == y.st_ino;
 #endif
 }
@@ -504,7 +522,8 @@ static zfs_native image_handle(FILE* file);
 
 static zfs_status verify_staged(zfs_disk* d, FILE* file, zfs_native device, zfs_error* e)
 {
-    unsigned char expected[SECTOR], actual[SECTOR];
+    unsigned char expected[SECTOR];
+    unsigned char actual[SECTOR];
     for (uint64_t i = 0; i < d->info.size / SECTOR; ++i) {
         if (dirty(d, i)) {
             zfs_status s = read_sector(d, i, expected, e);
@@ -535,7 +554,8 @@ static zfs_status verify_original_device(zfs_disk* d, zfs_error* e)
     if (!backup) {
         return zfs_error_set(e, ZFS_IO, "Cannot open retained backup for pre-commit verification");
     }
-    unsigned char original[65536], actual[65536];
+    unsigned char original[65536];
+    unsigned char actual[65536];
     zfs_status s = ZFS_OK;
     for (uint64_t at = 0; !s && at < d->recovery_size; at += sizeof(original)) {
         size_t n = d->recovery_size - at < sizeof(original) ? (size_t) (d->recovery_size - at) : sizeof(original);
@@ -546,7 +566,8 @@ static zfs_status verify_original_device(zfs_disk* d, zfs_error* e)
             s = zfs_native_read(d->device, d->recovery_offset + at, actual, n, e);
         }
         if (!s && memcmp(original, actual, n)) {
-            s = zfs_error_set(e, ZFS_BUSY,
+            s = zfs_error_set(e,
+                              ZFS_BUSY,
                               "Target or backup changed since preparation; no target sectors were written");
         }
     }
@@ -610,7 +631,9 @@ zfs_status zfs_apply(zfs_disk* d, zfs_error* e)
             }
             if (zfs_host_publish(temporary, d->info.path, !d->info.new_image)) {
 #ifdef _WIN32
-                s = zfs_error_set(e, ZFS_IO, "Cannot publish image (Windows error %lu)",
+                s = zfs_error_set(e,
+                                  ZFS_IO,
+                                  "Cannot publish image (Windows error %lu)",
                                   (unsigned long) GetLastError());
 #else
                 s = zfs_error_set(e, ZFS_IO, "Cannot publish image (destination exists or replacement failed)");
@@ -683,13 +706,15 @@ zfs_status zfs_apply(zfs_disk* d, zfs_error* e)
         }
         if (s) {
             d->info.failed = true;
-            return zfs_error_set(e, ZFS_PARTIAL_WRITE,
+            return zfs_error_set(e,
+                                 ZFS_PARTIAL_WRITE,
                                  "Apply or readback failed; device may be partially updated. Reopen it "
                                  "before restoring from the retained backup");
         }
     }
     /* Apply the changes in RAM too */
-    d->info.pending = d->info.new_image = false;
+    d->info.new_image = false;
+    d->info.pending = false;
     d->original = d->info;
     memset(d->dirty, 0, d->bitmap_size);
     d->dirty_count = 0;
@@ -715,7 +740,12 @@ static zfs_status mbr_write(zfs_disk* d, zfs_error* e)
         memset(p, 0, 16);
         if (part->active) {
             /* CHS fields not used */
-            p[1] = p[2] = p[3] = p[5] = p[6] = p[7] = 0xff;
+            p[7] = 0xff;
+            p[6] = 0xff;
+            p[5] = 0xff;
+            p[3] = 0xff;
+            p[2] = 0xff;
+            p[1] = 0xff;
             /* Partition type */
             p[4] = part->type;
             /* Start LBA */
@@ -760,7 +790,9 @@ zfs_status zfs_partition_space(zfs_disk* d, uint32_t alignment, uint64_t* start,
         return zfs_error_set(e, ZFS_INVALID, "Alignment must be a power of two, at least 512 bytes");
     }
     /* Make sure the first sector is taken (MBR), so start checking at sector 1 when an MBR is present */
-    uint64_t cursor = d->info.has_mbr ? SECTOR : 0, best = 0, best_start = 0;
+    uint64_t cursor = d->info.has_mbr ? SECTOR : 0;
+    uint64_t best = 0;
+    uint64_t best_start = 0;
     /* Build a sorted list of active partitions */
     zfs_partition parts[4];
     int n = 0;
@@ -823,7 +855,8 @@ static zfs_status format(zfs_disk* d, zfs_partition part, zfs_error* e)
 
 zfs_status zfs_partition_create(zfs_disk* d, uint64_t size, uint32_t alignment, int* index, zfs_error* e)
 {
-    uint64_t start, available;
+    uint64_t start;
+    uint64_t available;
     zfs_status s = zfs_partition_space(d, alignment, &start, &available, e);
     if (s) {
         return s;
@@ -851,7 +884,12 @@ zfs_status zfs_partition_create(zfs_disk* d, uint64_t size, uint32_t alignment, 
     if (s) {
         return s;
     }
-    d->info.partitions[slot] = (zfs_partition){true, 0x5a, (uint32_t) (start / SECTOR), (uint32_t) (size / SECTOR)};
+    d->info.partitions[slot] = (zfs_partition){
+        true,
+        0x5a,
+        (uint32_t) (start / SECTOR),
+        (uint32_t) (size / SECTOR),
+    };
     s = format(d, d->info.partitions[slot], e);
     if (!s && d->info.has_mbr) {
         /* Encode the partition in the staged MBR */
@@ -1022,7 +1060,8 @@ static zfs_status path_check(const char* path, zfs_error* e)
         const char* end = strchr(p, '/');
         size_t n = end ? (size_t) (end - p) : strlen(p);
         if (!n || n > 16 || (n == 1 && p[0] == '.') || (n == 2 && p[0] == '.' && p[1] == '.')) {
-            return zfs_error_set(e, ZFS_INVALID,
+            return zfs_error_set(e,
+                                 ZFS_INVALID,
                                  "Path components must be 1 to 16 bytes; dot components are unsupported");
         }
         if (!end) {
@@ -1627,7 +1666,8 @@ zfs_status zfs_core_stage_raw(zfs_disk* d, uint64_t offset, zfs_disk* source, ui
     if (s) {
         return s;
     }
-    unsigned char incoming[65536], current[65536];
+    unsigned char incoming[65536];
+    unsigned char current[65536];
     for (uint64_t at = 0; at < size && !s; at += sizeof(incoming)) {
         size_t n = size - at < sizeof(incoming) ? (size_t) (size - at) : sizeof(incoming);
         s = bytes_io(source, at, incoming, n, false, e);
@@ -1650,7 +1690,8 @@ zfs_status zfs_core_stage_raw(zfs_disk* d, uint64_t offset, zfs_disk* source, ui
 
 zfs_status zfs_core_copy_metadata(zfs_disk* source, int sp, zfs_disk* target, int tp, const char* path, zfs_error* e)
 {
-    filesystem *from = NULL, *to = NULL;
+    filesystem* from = NULL;
+    filesystem* to = NULL;
     zfs_status s = fs_open(source, sp, &from, e);
     if (s) {
         return s;
@@ -1660,7 +1701,8 @@ zfs_status zfs_core_copy_metadata(zfs_disk* source, int sp, zfs_disk* target, in
         free(from);
         return s;
     }
-    zealfs_fd_t a, b;
+    zealfs_fd_t a;
+    zealfs_fd_t b;
     s = fs_error(zealfs_stat(path, &from->fs, &a), e);
     if (!s) {
         s = fs_error(zealfs_stat(path, &to->fs, &b), e);
@@ -1719,7 +1761,8 @@ zfs_status zfs_core_copy_file(zfs_disk* source, int sp, zfs_disk* target, int tp
 
 zfs_status zfs_core_files_equal(zfs_disk* a, int ap, zfs_disk* b, int bp, const char* path, bool* equal, zfs_error* e)
 {
-    filesystem *x = NULL, *y = NULL;
+    filesystem* x = NULL;
+    filesystem* y = NULL;
     *equal = false;
     zfs_status s = fs_open(a, ap, &x, e);
     if (s) {
@@ -1732,7 +1775,8 @@ zfs_status zfs_core_files_equal(zfs_disk* a, int ap, zfs_disk* b, int bp, const 
             return s;
         }
     }
-    zealfs_fd_t xf, yf;
+    zealfs_fd_t xf;
+    zealfs_fd_t yf;
     s = fs_error(zealfs_open(path, &x->fs, &xf), e);
     if (!s && b) {
         s = fs_error(zealfs_open(path, &y->fs, &yf), e);
@@ -1742,7 +1786,8 @@ zfs_status zfs_core_files_equal(zfs_disk* a, int ap, zfs_disk* b, int bp, const 
         free(y);
         return ZFS_OK;
     }
-    unsigned char xb[65536], yb[65536];
+    unsigned char xb[65536];
+    unsigned char yb[65536];
     bool same = true;
     for (uint64_t at = 0; !s && at < xf.entry.size;) {
         size_t n = xf.entry.size - at < sizeof(xb) ? (size_t) (xf.entry.size - at) : sizeof(xb);

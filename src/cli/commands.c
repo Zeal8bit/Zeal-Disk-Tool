@@ -27,7 +27,9 @@ int cli_execute(cli_session* s, const cli_options* input)
     char path[512];
     if (path_argument >= 0) {
         if (!cli_filesystem_path(o->argv[path_argument], path)) {
-            return cli_failure(o, 1, "invalid argument",
+            return cli_failure(o,
+                               1,
+                               "invalid argument",
                                "ZealFS path must be nonempty and shorter than 512 bytes including its root slash");
         }
         if (importing && strcmp(path, "/") && o->argv[path_argument][strlen(o->argv[path_argument]) - 1] == '/') {
@@ -192,14 +194,24 @@ int cli_execute(cli_session* s, const cli_options* input)
             for (int i = 1; i < o->argc - 1; ++i) {
                 sources[i - 1] = o->argv[i];
             }
-            status = zfs_import_many(s->disk, o->partition, sources, (size_t) o->argc - 2, o->argv[o->argc - 1],
-                                     o->yes || o->dry_run, &e);
+            status = zfs_import_many(s->disk,
+                                     o->partition,
+                                     sources,
+                                     (size_t) o->argc - 2,
+                                     o->argv[o->argc - 1],
+                                     o->yes || o->dry_run,
+                                     &e);
             if (status == ZFS_EXISTS) {
                 if (!o->yes && !cli_confirm("Overwrite existing import destination files?", false)) {
                     return cli_failure(o, 3, "confirmation", "Import overwrite requires confirmation or --yes");
                 }
-                status = zfs_import_many(s->disk, o->partition, sources, (size_t) o->argc - 2, o->argv[o->argc - 1],
-                                         true, &e);
+                status = zfs_import_many(s->disk,
+                                         o->partition,
+                                         sources,
+                                         (size_t) o->argc - 2,
+                                         o->argv[o->argc - 1],
+                                         true,
+                                         &e);
             }
         } else {
             return cli_failure(o, 2, "usage", "Unknown command or incorrect arguments; use help");

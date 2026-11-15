@@ -8,14 +8,52 @@
 #include "ui/statusbar.h"
 #include "ui/tinyfiledialogs.h"
 #include <stdlib.h>
-static disk_list_state_t s_state = {.selected_disk = -1, .selected_partition = -1};
+static disk_list_state_t s_state = {
+    .selected_disk = -1,
+    .selected_partition = -1,
+};
 static zfs_error error;
 static unsigned next_revision;
-static const uint64_t s_valid_sizes[] = {32 * KB,  64 * KB,  128 * KB, 256 * KB, 512 * KB, 1 * MB,
-                                         2 * MB,   4 * MB,   8 * MB,   16 * MB,  32 * MB,  64 * MB,
-                                         128 * MB, 256 * MB, 512 * MB, 1 * GB,   2 * GB,   4 * GB};
-static const char* const sizes[] = {"32KiB", "64KiB", "128KiB", "256KiB", "512KiB", "1MiB",   "2MiB", "4MiB", "8MiB",
-                                    "16MiB", "32MiB", "64MiB",  "128MiB", "256MiB", "512MiB", "1GiB", "2GiB", "4GiB"};
+static const uint64_t s_valid_sizes[] = {
+    32 * KB,
+    64 * KB,
+    128 * KB,
+    256 * KB,
+    512 * KB,
+    1 * MB,
+    2 * MB,
+    4 * MB,
+    8 * MB,
+    16 * MB,
+    32 * MB,
+    64 * MB,
+    128 * MB,
+    256 * MB,
+    512 * MB,
+    1 * GB,
+    2 * GB,
+    4 * GB,
+};
+static const char* const sizes[] = {
+    "32KiB",
+    "64KiB",
+    "128KiB",
+    "256KiB",
+    "512KiB",
+    "1MiB",
+    "2MiB",
+    "4MiB",
+    "8MiB",
+    "16MiB",
+    "32MiB",
+    "64MiB",
+    "128MiB",
+    "256MiB",
+    "512MiB",
+    "1GiB",
+    "2GiB",
+    "4GiB",
+};
 
 const char* const* disk_get_partition_size_list(int* count)
 {
@@ -53,7 +91,11 @@ void disk_sync(disk_info_t* disk)
     for (int i = 0; i < 4; ++i) {
         const zfs_partition* part = &info->partitions[i];
         disk->partitions[i] = (partition_t){
-            .active = part->active, .type = part->type, .start_lba = part->start_lba, .size_sectors = part->sectors};
+            .active = part->active,
+            .type = part->type,
+            .start_lba = part->start_lba,
+            .size_sectors = part->sectors,
+        };
         disk->staged_partitions[i] = disk->partitions[i];
         if (!part->active && disk->free_part_idx < 0 && (info->has_mbr || i == 0)) {
             disk->free_part_idx = i;
@@ -187,7 +229,8 @@ const char* disk_write_changes(disk_info_t* disk)
 
 uint64_t disk_max_partition_size(disk_info_t* disk, uint32_t align, uint64_t* largest_free_addr)
 {
-    uint64_t free_bytes = 0, aligned_addr = 0;
+    uint64_t free_bytes = 0;
+    uint64_t aligned_addr = 0;
     if (disk) {
         disk->allocation_alignment = align;
         zfs_partition_space(disk->handle, align, &aligned_addr, &free_bytes, &error);

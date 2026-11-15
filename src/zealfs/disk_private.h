@@ -12,23 +12,34 @@
 #define fileno _fileno
 #endif
 struct zfs_disk {
-    zfs_info info, original;
-    FILE *base, *overlay, *undo;
+    zfs_info info;
+    zfs_info original;
+    FILE* base;
+    FILE* overlay;
+    FILE* undo;
     zfs_native device;
     unsigned char* dirty;
-    uint64_t dirty_count, undo_count, revision;
+    uint64_t dirty_count;
+    uint64_t undo_count;
+    uint64_t revision;
     size_t bitmap_size;
     zfs_callbacks callbacks;
     bool usage_cached[4];
-    uint64_t free_cache[4], total_cache[4];
+    uint64_t free_cache[4];
+    uint64_t total_cache[4];
     struct stat stamp;
 #ifdef _WIN32
     BY_HANDLE_FILE_INFORMATION win_stamp;
 #endif
-    bool borrowed_base, guarded, guard_write, verified_apply, recovery_is_merge;
+    bool borrowed_base;
+    bool guarded;
+    bool guard_write;
+    bool verified_apply;
+    bool recovery_is_merge;
     char recovery_backup[ZFS_PATH_MAX];
     int recovery_partition;
-    uint64_t recovery_offset, recovery_size;
+    uint64_t recovery_offset;
+    uint64_t recovery_size;
 };
 
 zfs_status zfs_core_guard(zfs_disk* disk, bool writing, zfs_error* error);

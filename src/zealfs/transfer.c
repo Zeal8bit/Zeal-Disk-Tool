@@ -7,17 +7,21 @@
 
 typedef struct {
     char* path;
-    bool directory, replace;
+    bool directory;
+    bool replace;
 } action;
 
 struct zfs_merge_plan {
-    zfs_disk *target, *view;
+    zfs_disk* target;
+    zfs_disk* view;
     zfs_merge_report* report;
     action* actions;
-    size_t count, capacity;
+    size_t count;
+    size_t capacity;
     uint64_t revision;
     zfs_partition partition;
-    bool ready, restore;
+    bool ready;
+    bool restore;
 };
 
 static char* copy_string(const char* s)
@@ -48,7 +52,12 @@ static zfs_status partition(zfs_disk* d, int index, bool raw_restore, zfs_partit
     }
     zfs_partition p = d->info.partitions[index];
     if (raw_restore && !d->info.has_mbr && index == 0) {
-        p = (zfs_partition){true, 0x5a, 0, (uint32_t) (d->info.size / 512)};
+        p = (zfs_partition){
+            true,
+            0x5a,
+            0,
+            (uint32_t) (d->info.size / 512),
+        };
     }
     if (!p.active || p.type != 0x5a) {
         return zfs_error_set(e, ZFS_INVALID, "Select an existing ZealFS partition");
@@ -141,16 +150,20 @@ static zfs_status conflict(zfs_merge_report* r, const char* path, zfs_error* e)
 static zfs_status walk(zfs_merge_plan* p, zfs_disk* source, int sp, int tp, const char* path, bool have_source,
                        bool have_target, zfs_error* e)
 {
-    zfs_entry *from = NULL, *to = NULL;
-    size_t sn = 0, tn = 0;
+    zfs_entry* from = NULL;
+    zfs_entry* to = NULL;
+    size_t sn = 0;
+    size_t tn = 0;
     zfs_status s = have_source ? list(source, sp, path, &from, &sn, e) : ZFS_OK;
     if (!s && have_target) {
         s = list(p->target, tp, path, &to, &tn, e);
     }
-    size_t i = 0, j = 0;
+    size_t i = 0;
+    size_t j = 0;
     while (!s && (i < sn || j < tn)) {
         int order = i == sn ? 1 : j == tn ? -1 : strcmp(from[i].name, to[j].name);
-        zfs_entry *a = order <= 0 ? &from[i] : NULL, *b = order >= 0 ? &to[j] : NULL;
+        zfs_entry* a = order <= 0 ? &from[i] : NULL;
+        zfs_entry* b = order >= 0 ? &to[j] : NULL;
         char child[512];
         s = child_path(path, a ? a->name : b->name, child, e);
         if (s) {
@@ -245,7 +258,8 @@ static zfs_status create_plan(zfs_disk* source, int sp, zfs_disk* target, int tp
     if (zfs_core_same_disk(source, target)) {
         return zfs_error_set(e, ZFS_INVALID, "Source and target must be distinct disks, including aliases");
     }
-    zfs_partition from, to;
+    zfs_partition from;
+    zfs_partition to;
     s = partition(source, sp, false, &from, e);
     if (!s) {
         s = partition(target, tp, restore, &to, e);
@@ -292,8 +306,11 @@ zfs_status zfs_merge_prepare(zfs_disk* source, int sp, zfs_disk* target, int tp,
     zfs_merge_plan* p = *out;
     s = walk(p, source, sp, tp, "/", true, true, e);
     if (!s && r->conflict_count) {
-        s = zfs_error_set(e, ZFS_CONFLICT, "Merge aborted: %zu file/directory type conflict(s), first: %s",
-                          r->conflict_count, r->conflicts[0]);
+        s = zfs_error_set(e,
+                          ZFS_CONFLICT,
+                          "Merge aborted: %zu file/directory type conflict(s), first: %s",
+                          r->conflict_count,
+                          r->conflicts[0]);
     }
     /* Free every replaced file first, so the final merged tree can fit even
      * when there is insufficient room to hold both old and new versions. */
@@ -355,8 +372,11 @@ static zfs_status backup_space(const char* path, uint64_t size, zfs_error* e)
         return zfs_error_set(e, ZFS_IO, "Cannot check backup destination free space");
     }
     if (available < size) {
-        return zfs_error_set(e, ZFS_NO_SPACE, "Backup requires %llu bytes; only %llu bytes are available",
-                             (unsigned long long) size, (unsigned long long) available);
+        return zfs_error_set(e,
+                             ZFS_NO_SPACE,
+                             "Backup requires %llu bytes; only %llu bytes are available",
+                             (unsigned long long) size,
+                             (unsigned long long) available);
     }
     return ZFS_OK;
 }
@@ -390,8 +410,10 @@ zfs_status zfs_backup_partition(zfs_disk* d, int part, const char* path, zfs_err
     if (!file) {
         return zfs_error_set(e, ZFS_IO, "Cannot create backup temporary file");
     }
-    unsigned char original[65536], saved[65536];
-    uint64_t size = (uint64_t) p.sectors * 512, offset = (uint64_t) p.start_lba * 512;
+    unsigned char original[65536];
+    unsigned char saved[65536];
+    uint64_t size = (uint64_t) p.sectors * 512;
+    uint64_t offset = (uint64_t) p.start_lba * 512;
     for (uint64_t at = 0; !s && at < size; at += sizeof(original)) {
         size_t n = size - at < sizeof(original) ? (size_t) (size - at) : sizeof(original);
         s = zfs_core_read(d, offset + at, original, n, e);
