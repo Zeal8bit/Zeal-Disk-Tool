@@ -1,4 +1,6 @@
 /**
+ * SPDX-FileCopyrightText: 2026 David Higgins <zoul0813@me.com>
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #include "disk_private.h"

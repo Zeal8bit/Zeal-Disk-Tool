@@ -1,4 +1,6 @@
 /**
+ * SPDX-FileCopyrightText: 2026 David Higgins <zoul0813@me.com>
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 #ifndef ZDT_CLI_H
