@@ -5,6 +5,10 @@
 #define ZFS_INTERNAL_H
 #include "zealfs.h"
 #include <stdio.h>
+/* Scratch bytes per streamed file/image transfer, not an on-disk format limit.
+ * Comparisons may hold two buffers at once. Keep sector transfers aligned when
+ * adjusting this value; changing it does not change the supported disk size. */
+#define ZFS_TRANSFER_BUFFER_SIZE (64 * 1024)
 #ifdef _WIN32
 #include <windows.h>
 typedef HANDLE zfs_native;

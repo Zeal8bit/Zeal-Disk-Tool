@@ -79,7 +79,7 @@ static void print_info(const cli_options* opt, const zfs_info* info, zfs_disk* d
                info->failed ? "  FAILED: reopen required" : "");
     }
     bool comma = false;
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < ZFS_MAX_PARTITIONS; ++i) {
         const zfs_partition* partition_info = &info->partitions[i];
         if (!partition_info->active) {
             continue;
@@ -105,7 +105,7 @@ static void print_info(const cli_options* opt, const zfs_info* info, zfs_disk* d
                    i + 1,
                    partition_info->type,
                    partition_info->start_lba,
-                   (uint64_t) partition_info->sectors * 512);
+                   (uint64_t) partition_info->sectors * DISK_SECTOR_SIZE);
             if (usage) {
                 printf("  free %" PRIu64 "/%" PRIu64, available, total);
             }

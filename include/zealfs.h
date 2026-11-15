@@ -11,8 +11,13 @@
 extern "C" {
 #endif
 #define ZFS_MAX_PARTITIONS 4
+/* MBR partition type and logical sector size shared by both frontends. */
+#define ZEALFS_TYPE 0x5a
+#define DISK_SECTOR_SIZE UINT64_C(512)
 #define ZFS_MAX_DISK_SIZE (UINT64_C(64) * 1024 * 1024 * 1024)
+/* Host paths and rooted filesystem paths have different limits; both include NUL. */
 #define ZFS_PATH_MAX 4096
+#define ZFS_FS_PATH_MAX 512
 #define ZFS_NAME_MAX 16
 typedef struct zfs_disk zfs_disk;
 

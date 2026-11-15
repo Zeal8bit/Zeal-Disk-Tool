@@ -18,7 +18,8 @@ static bool select_partition(zfs_disk* disk, int requested, bool raw_restore, in
         return true;
     }
     if (requested >= 0) {
-        if (requested < 4 && info->partitions[requested].active && info->partitions[requested].type == 0x5a) {
+        if (requested < ZFS_MAX_PARTITIONS && info->partitions[requested].active &&
+            info->partitions[requested].type == ZEALFS_TYPE) {
             *selected = requested;
             return true;
         }
@@ -27,8 +28,8 @@ static bool select_partition(zfs_disk* disk, int requested, bool raw_restore, in
         return false;
     }
     int count = 0;
-    for (int i = 0; i < 4; ++i) {
-        if (info->partitions[i].active && info->partitions[i].type == 0x5a) {
+    for (int i = 0; i < ZFS_MAX_PARTITIONS; ++i) {
+        if (info->partitions[i].active && info->partitions[i].type == ZEALFS_TYPE) {
             *selected = i;
             ++count;
         }

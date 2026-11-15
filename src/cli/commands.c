@@ -24,7 +24,7 @@ int cli_execute(cli_session* session, const cli_options* input)
     } else if (importing) {
         path_argument = opt->argc - 1;
     }
-    char path[512];
+    char path[ZFS_FS_PATH_MAX];
     if (path_argument >= 0) {
         if (!cli_filesystem_path(opt->argv[path_argument], path)) {
             return cli_failure(opt,

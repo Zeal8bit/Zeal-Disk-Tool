@@ -14,6 +14,7 @@ zfs_status zfs_discover(zfs_info* out, size_t capacity, size_t* count, zfs_error
         return zfs_error_set(error, ZFS_INVALID, "Invalid discovery buffer");
     }
     *count = 0;
+    /* Raw rdiskN devices provide whole-disk access; rdiskNsM are partitions. */
     DIR* dir = opendir("/dev");
     if (dir == NULL) {
         return zfs_error_set(error, ZFS_IO, "Cannot enumerate /dev");

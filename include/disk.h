@@ -14,12 +14,10 @@
 #define MB UINT64_C(1048576)
 #define KB UINT64_C(1024)
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
-#define ZEALFS_TYPE 0x5a
 #define MAX_DISKS 32
-#define MAX_PART_COUNT 4
+#define MAX_PART_COUNT ZFS_MAX_PARTITIONS
 #define MAX_DISK_SIZE ZFS_MAX_DISK_SIZE
 #define DISK_LABEL_LEN 512
-#define DISK_SECTOR_SIZE UINT64_C(512)
 
 typedef enum {
     ERR_SUCCESS,
@@ -46,8 +44,8 @@ typedef struct {
     bool has_mbr;
     /* Staged changes, to be applied */
     bool has_staged_changes;
-    partition_t partitions[4];
-    partition_t staged_partitions[4];
+    partition_t partitions[MAX_PART_COUNT];
+    partition_t staged_partitions[MAX_PART_COUNT];
     int free_part_idx;
     zfs_disk* handle;
     unsigned revision;
@@ -76,7 +74,7 @@ static inline disk_info_t* disk_get_current(disk_list_state_t* state)
 
 static inline int disk_is_valid_zealfs_partition(partition_t* part)
 {
-    return part != NULL && part->active && part->type == 0x5a;
+    return part != NULL && part->active && part->type == ZEALFS_TYPE;
 }
 
 static inline int disk_can_be_switched(disk_info_t* disk)

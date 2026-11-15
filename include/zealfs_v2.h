@@ -11,6 +11,10 @@
 #include <inttypes.h>
 #include <assert.h>
 
+#ifndef MIN
+#define MIN(a,b)    (((a) < (b)) ? (a) : (b))
+#endif
+
 #ifndef BIT
 #define BIT(X)  (1ULL << (X))
 #endif
@@ -26,6 +30,14 @@
 #ifndef GB
 #define GB  (1073741824ULL)
 #endif
+
+#define ZEALFS_V2_MAGIC 'Z'
+#define ZEALFS_V2_VERSION 2
+/* Page bytes are 256 << page_size; encoding 8 is the largest supported page (64 KiB). */
+#define ZEALFS_V2_MAX_PAGE_SHIFT 8
+/* Preserve the supported 8 KiB minimum and 4 GiB maximum partition capacities. */
+#define ZEALFS_V2_MIN_PARTITION_SIZE (8 * KB)
+#define ZEALFS_V2_MAX_PARTITION_SIZE (4 * GB)
 
 /* Bit 0 is 1 if is directory */
 #define IS_DIR (1 << 0)
@@ -149,8 +161,8 @@ static inline int zealfsv2_page_size(uint64_t part_size)
 static inline int zealfsv2_format(uint8_t* partition, uint64_t size) {
     /* Initialize image header */
     zealfs_header_t* header = (zealfs_header_t*) partition;
-    header->magic = 'Z';
-    header->version = 2;
+    header->magic = ZEALFS_V2_MAGIC;
+    header->version = ZEALFS_V2_VERSION;
     /* According to the size of the disk, we have to calculate the size of the pages */
     const int page_size_bytes = zealfsv2_page_size(size);
     /* The page size in the header is the log2(page_bytes/256) - 1 */

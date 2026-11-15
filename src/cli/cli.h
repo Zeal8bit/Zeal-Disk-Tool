@@ -55,7 +55,7 @@ typedef struct {
 bool cli_parse(int argc, char** argv, cli_options* options, char* error, size_t capacity);
 bool cli_parse_shell(int argc, char** argv, cli_options* options, char* error, size_t capacity);
 bool cli_command_matches(const cli_options* options, const char* command, const char* subcommand, int count);
-bool cli_filesystem_path(const char* input, char output[512]);
+bool cli_filesystem_path(const char* input, char output[ZFS_FS_PATH_MAX]);
 
 /* Context-specific help and complete text/JSON output. */
 void cli_usage(void);

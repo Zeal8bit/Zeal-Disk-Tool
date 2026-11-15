@@ -122,9 +122,11 @@ static zfs_status walk(zfs_disk* disk, int part, char* path, char* host, bool di
         size_t source_length = strlen(path);
         size_t host_length = strlen(host);
         bool root = strcmp(path, "/") == 0;
-        int n = snprintf(path + source_length, 512 - source_length, "%s%s", root ? "" : "/", entries[i].name);
+        int n =
+            snprintf(path + source_length, ZFS_FS_PATH_MAX - source_length, "%s%s", root ? "" : "/", entries[i].name);
         int m = snprintf(host + host_length, ZFS_PATH_MAX - host_length, "/%s", entries[i].name);
-        if (n < 0 || (size_t) n >= 512 - source_length || m < 0 || (size_t) m >= ZFS_PATH_MAX - host_length) {
+        if (n < 0 || (size_t) n >= ZFS_FS_PATH_MAX - source_length || m < 0 ||
+            (size_t) m >= ZFS_PATH_MAX - host_length) {
             status = zfs_error_set(error, ZFS_INVALID, "Export path is too long");
         } else {
             status = walk(disk, part, path, host, entries[i].directory, write, overwrite, exists, NULL, error);
@@ -139,7 +141,7 @@ static zfs_status walk(zfs_disk* disk, int part, char* path, char* host, bool di
 static zfs_status export_tree(zfs_disk* disk, int part, const char* path, const char* host, bool write, bool overwrite,
                               zfs_error* error)
 {
-    if (path == NULL || *path == 0 || strlen(path) >= 512) {
+    if (path == NULL || *path == 0 || strlen(path) >= ZFS_FS_PATH_MAX) {
         return zfs_error_set(error, ZFS_INVALID, "Invalid export source path");
     }
     zfs_status status = zfs_core_export_destination(disk, host, error);
@@ -147,9 +149,9 @@ static zfs_status export_tree(zfs_disk* disk, int part, const char* path, const 
         return status;
     }
     /* Reuse one pair of path buffers at every depth to keep traversal stack use bounded. */
-    char source[512];
+    char source[ZFS_FS_PATH_MAX];
     char destination[ZFS_PATH_MAX];
-    char pattern[512];
+    char pattern[ZFS_FS_PATH_MAX];
     strcpy(source, path);
     strcpy(destination, host);
     bool matching = strpbrk(path, "*?") != NULL;

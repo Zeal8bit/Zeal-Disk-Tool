@@ -18,7 +18,6 @@
 #include <dirent.h>
 #include "zealfs_v2.h"
 
-#define MIN(a,b)    (((a) < (b)) ? (a) : (b))
 /**
  * Macro to help converting a page number into an address in the cache.
  */
@@ -67,7 +66,8 @@ static inline int check_header(zealfs_context_t* ctx) {
     if (ctx->read(ctx->arg, ctx->header, 0, sizeof(zealfs_header_t)) != sizeof(zealfs_header_t)) {
         return -EIO;
     }
-    if (header->magic != 'Z' || header->version != 2 || header->page_size > 8 || !header->bitmap_size ||
+    if (header->magic != ZEALFS_V2_MAGIC || header->version != ZEALFS_V2_VERSION ||
+        header->page_size > ZEALFS_V2_MAX_PAGE_SHIFT || !header->bitmap_size ||
         header->bitmap_size > 8192) {
         return -EIO;
     }

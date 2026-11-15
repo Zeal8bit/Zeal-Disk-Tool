@@ -82,6 +82,8 @@ static bool parse(int argc, char** argv, cli_options* opt, char* error, size_t c
             opt->backup = argv[++i];
         } else if (strcmp(arg, "--size") == 0 || strcmp(arg, "--alignment") == 0 ||
                    (strcmp(arg, "--partition") == 0 || strcmp(arg, "--from-partition") == 0)) {
+            /* Share numeric parsing for sizes, alignment and partition indices;
+             * then validate each option's units/range before narrowing its type. */
             uint64_t value;
             if (i + 1 >= argc || !size_value(argv[++i], &value)) {
                 snprintf(error, capacity, "Invalid value for %s", arg);
@@ -91,13 +93,13 @@ static bool parse(int argc, char** argv, cli_options* opt, char* error, size_t c
                 opt->size = value;
                 opt->size_set = true;
             } else if (strcmp(arg, "--alignment") == 0) {
-                if (value > UINT32_MAX || value < 512 || (value & (value - 1)) != 0) {
+                if (value > UINT32_MAX || value < DISK_SECTOR_SIZE || (value & (value - 1)) != 0) {
                     snprintf(error, capacity, "Invalid alignment");
                     return false;
                 }
                 opt->alignment = (uint32_t) value;
             } else {
-                if (value < 1 || value > 4) {
+                if (value < 1 || value > ZFS_MAX_PARTITIONS) {
                     snprintf(error, capacity, "Partition must be 1–4");
                     return false;
                 }
@@ -155,7 +157,7 @@ bool cli_command_matches(const cli_options* opt, const char* command, const char
 
 /* CLI paths are always rooted in the selected filesystem. Host paths are left
  * untouched; the core continues to receive canonical absolute ZealFS paths. */
-bool cli_filesystem_path(const char* input, char output[512])
+bool cli_filesystem_path(const char* input, char output[ZFS_FS_PATH_MAX])
 {
     if (*input == 0) {
         return false;
@@ -167,7 +169,8 @@ bool cli_filesystem_path(const char* input, char output[512])
     while (length != 0 && input[length - 1] == '/') {
         --length;
     }
-    if (length > 510) {
+    /* Reserve one byte for the root slash and one for the terminating NUL. */
+    if (length > ZFS_FS_PATH_MAX - 2) {
         return false;
     }
     output[0] = '/';

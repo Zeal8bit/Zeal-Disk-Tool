@@ -88,7 +88,7 @@ void disk_sync(disk_info_t* disk)
     /* Extract the filename out of the path */
     snprintf(disk->name, sizeof(disk->name), "%s", disk_get_basename(info->path));
     disk->free_part_idx = -1;
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < MAX_PART_COUNT; ++i) {
         const zfs_partition* part = &info->partitions[i];
         disk->partitions[i] = (partition_t){
             .active = part->active,
@@ -184,10 +184,11 @@ int disk_create_mbr(disk_info_t* disk)
 void disk_allocate_partition(disk_info_t* disk, uint32_t lba, uint32_t sectors_count)
 {
     (void) lba;
-    uint32_t alignment = disk != NULL && disk->allocation_alignment != 0 ? disk->allocation_alignment : 512;
+    uint32_t alignment =
+        disk != NULL && disk->allocation_alignment != 0 ? disk->allocation_alignment : DISK_SECTOR_SIZE;
     int index;
     zfs_status status = zfs_partition_create(disk != NULL ? disk->handle : NULL,
-                                             (uint64_t) sectors_count * 512,
+                                             (uint64_t) sectors_count * DISK_SECTOR_SIZE,
                                              alignment,
                                              &index,
                                              &error);
@@ -312,7 +313,7 @@ const char* disk_get_fs_type(uint8_t fs_byte)
         return "ext4";
     case 0xa5:
         return "exFAT";
-    case 0x5a:
+    case ZEALFS_TYPE:
         return "ZealFS";
     case 0x5e:
         return "UFS";

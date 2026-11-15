@@ -19,7 +19,19 @@
 #endif
 
 enum {
-    KEY_UP = 256,
+    KEY_CTRL_A = 1,
+    KEY_CTRL_C = 3,
+    KEY_CTRL_D = 4,
+    KEY_CTRL_E = 5,
+    KEY_BACKSPACE = 8,
+    KEY_TAB = 9,
+    KEY_CTRL_U = 21,
+    KEY_ESCAPE = 27,
+    KEY_SPACE = 32,
+    KEY_DEL = 127,
+    ASCII_LIMIT = 128,
+    INPUT_BYTE_LIMIT = 256,
+    KEY_UP = INPUT_BYTE_LIMIT,
     KEY_DOWN,
     KEY_LEFT,
     KEY_RIGHT,
@@ -28,7 +40,38 @@ enum {
     KEY_DELETE,
     KEY_IGNORE
 };
+
+enum {
+    DEFAULT_TERMINAL_COLUMNS = 80,
+    /* Five prompt columns plus two columns kept clear at the right edge. */
+    VIEWPORT_RESERVED_COLUMNS = 7,
+    TAB_COLUMNS = 8,
+    UTF8_MAX_BYTES = 4,
+    UTF16_MAX_UNITS = 2,
+    ESCAPE_SEQUENCE_CAPACITY = 16,
+    ESCAPE_TIMEOUT_MS = 100,
+    CSI_FINAL_BYTE_MIN = 0x40,
+    CSI_FINAL_BYTE_MAX = 0x7e,
+    UTF8_CONTINUATION_MASK = 0xc0,
+    UTF8_CONTINUATION_TAG = 0x80
+};
 #ifdef _WIN32
+/* _getwch returns a prefix followed by a scan code for navigation keys.
+ * These are console scan codes, not Win32 VK_* virtual-key codes. */
+enum {
+    SCAN_PREFIX = 0,
+    SCAN_EXTENDED_PREFIX = 0xe0,
+    SCAN_UP = 72,
+    SCAN_DOWN = 80,
+    SCAN_LEFT = 75,
+    SCAN_RIGHT = 77,
+    SCAN_HOME = 71,
+    SCAN_END = 79,
+    SCAN_DELETE = 83,
+    UTF16_HIGH_SURROGATE_FIRST = 0xd800,
+    UTF16_HIGH_SURROGATE_LAST = 0xdbff
+};
+
 static DWORD input_mode;
 static DWORD output_mode;
 static UINT output_codepage;
@@ -68,44 +111,45 @@ static void editing_end(void)
 static int columns(void)
 {
     CONSOLE_SCREEN_BUFFER_INFO info;
-    return GetConsoleScreenBufferInfo(output_handle, &info) != 0 ? info.srWindow.Right - info.srWindow.Left + 1 : 80;
+    return GetConsoleScreenBufferInfo(output_handle, &info) != 0 ? info.srWindow.Right - info.srWindow.Left + 1
+                                                                 : DEFAULT_TERMINAL_COLUMNS;
 }
 
 static int read_key(void)
 {
-    static unsigned char encoded[4];
+    static unsigned char encoded[UTF8_MAX_BYTES];
     static int at;
     static int count;
     if (at < count) {
         return encoded[at++];
     }
     wint_t key = _getwch();
-    if (key == 0 || key == 0xe0) {
+    if (key == SCAN_PREFIX || key == SCAN_EXTENDED_PREFIX) {
         switch (_getwch()) {
-        case 72:
+        case SCAN_UP:
             return KEY_UP;
-        case 80:
+        case SCAN_DOWN:
             return KEY_DOWN;
-        case 75:
+        case SCAN_LEFT:
             return KEY_LEFT;
-        case 77:
+        case SCAN_RIGHT:
             return KEY_RIGHT;
-        case 71:
+        case SCAN_HOME:
             return KEY_HOME;
-        case 79:
+        case SCAN_END:
             return KEY_END;
-        case 83:
+        case SCAN_DELETE:
             return KEY_DELETE;
         default:
             return KEY_IGNORE;
         }
     }
-    if (key < 128) {
+    if (key < ASCII_LIMIT) {
         return (int) key;
     }
-    wchar_t text[2] = {(wchar_t) key, 0};
+    wchar_t text[UTF16_MAX_UNITS] = {(wchar_t) key, 0};
     int length = 1;
-    if (key >= 0xd800 && key <= 0xdbff) {
+    if (key >= UTF16_HIGH_SURROGATE_FIRST && key <= UTF16_HIGH_SURROGATE_LAST) {
         text[1] = (wchar_t) _getwch();
         length = 2;
     }
@@ -118,13 +162,19 @@ static int read_key(void)
 static struct termios saved_mode;
 static struct termios edit_mode;
 static const int signals[] = {SIGINT, SIGTERM, SIGHUP, SIGQUIT, SIGTSTP};
-static struct sigaction saved_signals[5];
+
+enum {
+    SIGNAL_COUNT = sizeof(signals) / sizeof(signals[0])
+};
+static struct sigaction saved_signals[SIGNAL_COUNT];
 static volatile sig_atomic_t active;
 
 static void interrupted(int number)
 {
+    /* Restore the terminal before delivering the signal's previous action.
+     * If a stopped process resumes, reinstall editing mode for the active read. */
     tcsetattr(STDIN_FILENO, TCSANOW, &saved_mode);
-    for (size_t i = 0; i < 5; ++i) {
+    for (size_t i = 0; i < SIGNAL_COUNT; ++i) {
         if (signals[i] == number) {
             struct sigaction handler;
             sigaction(number, &saved_signals[i], &handler);
@@ -158,13 +208,16 @@ static bool editing_begin(void)
     struct sigaction handler = {0};
     handler.sa_handler = interrupted;
     sigemptyset(&handler.sa_mask);
+    /* Raw editing disables the terminal's normal signal processing. While it
+     * is active, external termination/suspend signals must still restore echo
+     * and canonical input before exiting or handing the terminal back. */
     size_t i;
-    for (i = 0; i < 5; ++i) {
+    for (i = 0; i < SIGNAL_COUNT; ++i) {
         if (sigaction(signals[i], &handler, &saved_signals[i]) != 0) {
             break;
         }
     }
-    if (i == 5 && tcsetattr(STDIN_FILENO, TCSANOW, &edit_mode) == 0) {
+    if (i == SIGNAL_COUNT && tcsetattr(STDIN_FILENO, TCSANOW, &edit_mode) == 0) {
         active = 1;
         return true;
     }
@@ -178,7 +231,7 @@ static void editing_end(void)
 {
     active = 0;
     tcsetattr(STDIN_FILENO, TCSANOW, &saved_mode);
-    for (size_t i = 0; i < 5; ++i) {
+    for (size_t i = 0; i < SIGNAL_COUNT; ++i) {
         sigaction(signals[i], &saved_signals[i], NULL);
     }
 }
@@ -186,7 +239,7 @@ static void editing_end(void)
 static int columns(void)
 {
     struct winsize size;
-    return ioctl(STDERR_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col != 0 ? size.ws_col : 80;
+    return ioctl(STDERR_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col != 0 ? size.ws_col : DEFAULT_TERMINAL_COLUMNS;
 }
 
 static int read_byte(void)
@@ -202,25 +255,25 @@ static int read_byte(void)
 static int escape_byte(void)
 {
     struct pollfd fd = {STDIN_FILENO, POLLIN, 0};
-    return poll(&fd, 1, 100) > 0 ? read_byte() : EOF;
+    return poll(&fd, 1, ESCAPE_TIMEOUT_MS) > 0 ? read_byte() : EOF;
 }
 
 static int read_key(void)
 {
     int key = read_byte();
-    if (key != 27) {
+    if (key != KEY_ESCAPE) {
         return key;
     }
     int prefix = escape_byte();
     if (prefix != '[' && prefix != 'O') {
         return KEY_IGNORE;
     }
-    char sequence[16];
+    char sequence[ESCAPE_SEQUENCE_CAPACITY];
     size_t n = 0;
     int c;
     while ((c = escape_byte()) != EOF && n < sizeof(sequence) - 1) {
         sequence[n++] = (char) c;
-        if (c >= 0x40 && c <= 0x7e) {
+        if (c >= CSI_FINAL_BYTE_MIN && c <= CSI_FINAL_BYTE_MAX) {
             break;
         }
     }
@@ -254,7 +307,7 @@ static size_t previous(const char* line, size_t at)
     if (at != 0) {
         --at;
     }
-    while (at != 0 && ((unsigned char) line[at] & 0xc0) == 0x80) {
+    while (at != 0 && ((unsigned char) line[at] & UTF8_CONTINUATION_MASK) == UTF8_CONTINUATION_TAG) {
         --at;
     }
     return at;
@@ -265,7 +318,7 @@ static size_t next(const char* line, size_t at)
     if (line[at] != 0) {
         ++at;
     }
-    while (line[at] != 0 && ((unsigned char) line[at] & 0xc0) == 0x80) {
+    while (line[at] != 0 && ((unsigned char) line[at] & UTF8_CONTINUATION_MASK) == UTF8_CONTINUATION_TAG) {
         ++at;
     }
     return at;
@@ -275,12 +328,12 @@ static size_t next(const char* line, size_t at)
  * columns for non-ASCII characters so wide glyphs cannot wrap the prompt. */
 static int width(const char* line, size_t at)
 {
-    return line[at] == '\t' ? 8 : (unsigned char) line[at] < 128 ? 1 : 2;
+    return line[at] == '\t' ? TAB_COLUMNS : (unsigned char) line[at] < ASCII_LIMIT ? 1 : 2;
 }
 
 static void redraw(const char* line, size_t cursor)
 {
-    int room = columns() - 7;
+    int room = columns() - VIEWPORT_RESERVED_COLUMNS;
     if (room < 2) {
         room = 2;
     }
@@ -367,11 +420,11 @@ cli_input cli_readline(cli_history* history, char line[CLI_LINE_CAPACITY], bool 
             result = overflow ? CLI_INPUT_LONG : CLI_INPUT_OK;
             break;
         }
-        if (key == 3) {
+        if (key == KEY_CTRL_C) {
             line[0] = 0;
             break;
         }
-        if (key == 4 && length == 0) {
+        if (key == KEY_CTRL_D && length == 0) {
             result = CLI_INPUT_EOF;
             break;
         }
@@ -396,25 +449,25 @@ cli_input cli_readline(cli_history* history, char line[CLI_LINE_CAPACITY], bool 
             cursor = previous(line, cursor);
         } else if (key == KEY_RIGHT) {
             cursor = next(line, cursor);
-        } else if (key == KEY_HOME || key == 1) {
+        } else if (key == KEY_HOME || key == KEY_CTRL_A) {
             cursor = 0;
-        } else if (key == KEY_END || key == 5) {
+        } else if (key == KEY_END || key == KEY_CTRL_E) {
             cursor = length;
-        } else if (key == 21) {
+        } else if (key == KEY_CTRL_U) {
             cursor = 0;
             length = 0;
             line[0] = 0;
             overflow = false;
-        } else if ((key == 127 || key == 8) && cursor != 0) {
+        } else if ((key == KEY_DEL || key == KEY_BACKSPACE) && cursor != 0) {
             size_t before = previous(line, cursor);
             memmove(line + before, line + cursor, length - cursor + 1);
             length -= cursor - before;
             cursor = before;
-        } else if ((key == KEY_DELETE || key == 4) && cursor < length) {
+        } else if ((key == KEY_DELETE || key == KEY_CTRL_D) && cursor < length) {
             size_t after = next(line, cursor);
             memmove(line + cursor, line + after, length - after + 1);
             length -= after - cursor;
-        } else if ((key == 9 || key >= 32) && key < 256 && key != 127) {
+        } else if ((key == KEY_TAB || key >= KEY_SPACE) && key < INPUT_BYTE_LIMIT && key != KEY_DEL) {
             if (length >= CLI_LINE_CAPACITY - 2) {
                 overflow = true;
                 fputc('\a', stderr);

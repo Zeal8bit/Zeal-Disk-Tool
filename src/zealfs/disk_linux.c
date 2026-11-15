@@ -14,6 +14,8 @@ zfs_status zfs_discover(zfs_info* out, size_t capacity, size_t* count, zfs_error
         return zfs_error_set(error, ZFS_INVALID, "Invalid discovery buffer");
     }
     *count = 0;
+    /* sysfs lists block devices independently of whether their partitions are
+     * mounted. Each partition has a `partition` attribute; whole disks do not. */
     DIR* dir = opendir("/sys/class/block");
     if (dir == NULL) {
         return zfs_error_set(error, ZFS_IO, "Cannot enumerate /sys/class/block");
@@ -21,6 +23,8 @@ zfs_status zfs_discover(zfs_info* out, size_t capacity, size_t* count, zfs_error
     struct dirent* entry;
     while ((entry = readdir(dir)) != NULL && *count < capacity) {
         const char* name = entry->d_name;
+        /* Match device-family prefixes, including numbered names such as sdb
+         * and mmcblk0. Full-string comparisons would reject those devices. */
         if (strncmp(name, "sd", 2) != 0 && strncmp(name, "mmcblk", 6) != 0 && strncmp(name, "nvme", 4) != 0 &&
             strncmp(name, "vd", 2) != 0) {
             continue;
@@ -28,6 +32,7 @@ zfs_status zfs_discover(zfs_info* out, size_t capacity, size_t* count, zfs_error
         char path[ZFS_PATH_MAX];
         char partition[ZFS_PATH_MAX];
         snprintf(partition, sizeof(partition), "/sys/class/block/%s/partition", name);
+        /* Exclude partitions and eMMC boot/RPMB hardware regions. */
         if (access(partition, F_OK) == 0 || strstr(name, "boot") != NULL || strstr(name, "rpmb") != NULL) {
             continue;
         }

@@ -47,34 +47,35 @@ static zfs_status clean(zfs_disk* disk, zfs_error* error)
 
 static zfs_status partition(zfs_disk* disk, int index, bool raw_restore, zfs_partition* out, zfs_error* error)
 {
-    if (index < 0 || index >= 4) {
+    if (index < 0 || index >= ZFS_MAX_PARTITIONS) {
         return zfs_error_set(error, ZFS_INVALID, "Invalid partition selection");
     }
     zfs_partition partition_info = disk->info.partitions[index];
     if (raw_restore && !disk->info.has_mbr && index == 0) {
         partition_info = (zfs_partition){
             true,
-            0x5a,
+            ZEALFS_TYPE,
             0,
-            (uint32_t) (disk->info.size / 512),
+            (uint32_t) (disk->info.size / DISK_SECTOR_SIZE),
         };
     }
-    if (!partition_info.active || partition_info.type != 0x5a) {
+    if (!partition_info.active || partition_info.type != ZEALFS_TYPE) {
         return zfs_error_set(error, ZFS_INVALID, "Select an existing ZealFS partition");
     }
     *out = partition_info;
     return ZFS_OK;
 }
 
-static zfs_status child_path(const char* parent, const char* name, char out[512], zfs_error* error)
+static zfs_status child_path(const char* parent, const char* name, char out[ZFS_FS_PATH_MAX], zfs_error* error)
 {
     size_t name_length = strlen(name);
     if (name_length == 0 || strchr(name, '/') != NULL || strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
         return zfs_error_set(error, ZFS_CORRUPT, "Invalid filesystem entry name");
     }
-    int length = snprintf(out, 512, "%s%s%s", parent, strcmp(parent, "/") == 0 ? "" : "/", name);
-    return length < 0 || length >= 512 ? zfs_error_set(error, ZFS_INVALID, "Filesystem path exceeds 511 bytes")
-                                       : ZFS_OK;
+    int length = snprintf(out, ZFS_FS_PATH_MAX, "%s%s%s", parent, strcmp(parent, "/") == 0 ? "" : "/", name);
+    return length < 0 || length >= ZFS_FS_PATH_MAX
+               ? zfs_error_set(error, ZFS_INVALID, "Filesystem path exceeds 511 bytes")
+               : ZFS_OK;
 }
 
 static int compare_entries(const void* first, const void* second)
@@ -169,7 +170,7 @@ static zfs_status walk(zfs_merge_plan* plan, zfs_disk* source, int source_partit
                         : strcmp(source_entries[source_index].name, target_entries[target_index].name);
         zfs_entry* source_entry = order <= 0 ? &source_entries[source_index] : NULL;
         zfs_entry* target_entry = order >= 0 ? &target_entries[target_index] : NULL;
-        char child[512];
+        char child[ZFS_FS_PATH_MAX];
         status = child_path(path, source_entry != NULL ? source_entry->name : target_entry->name, child, error);
         if (status != ZFS_OK) {
             break;
@@ -230,7 +231,7 @@ static zfs_status validate_tree(zfs_disk* disk, int part, const char* path, zfs_
     size_t count = 0;
     zfs_status status = list(disk, part, path, &entries, &count, error);
     for (size_t i = 0; status == ZFS_OK && i < count; ++i) {
-        char child[512];
+        char child[ZFS_FS_PATH_MAX];
         status = child_path(path, entries[i].name, child, error);
         if (status == ZFS_OK) {
             status = entries[i].directory ? validate_tree(disk, part, child, error)
@@ -287,7 +288,7 @@ static zfs_status create_plan(zfs_disk* source, int source_partition, zfs_disk* 
     }
     plan->target = target;
     plan->partition = to;
-    report->backup_bytes = (uint64_t) to.sectors * 512;
+    report->backup_bytes = (uint64_t) to.sectors * DISK_SECTOR_SIZE;
     plan->revision = target->revision;
     plan->report = report;
     plan->restore = restore;
@@ -410,7 +411,7 @@ zfs_status zfs_backup_partition(zfs_disk* disk, int part, const char* path, zfs_
     if (status != ZFS_OK) {
         return status;
     }
-    status = backup_space(resolved, (uint64_t) partition_info.sectors * 512, error);
+    status = backup_space(resolved, (uint64_t) partition_info.sectors * DISK_SECTOR_SIZE, error);
     if (status != ZFS_OK) {
         return status;
     }
@@ -423,10 +424,10 @@ zfs_status zfs_backup_partition(zfs_disk* disk, int part, const char* path, zfs_
     if (file == NULL) {
         return zfs_error_set(error, ZFS_IO, "Cannot create backup temporary file");
     }
-    unsigned char original[65536];
-    unsigned char saved[65536];
-    uint64_t size = (uint64_t) partition_info.sectors * 512;
-    uint64_t offset = (uint64_t) partition_info.start_lba * 512;
+    unsigned char original[ZFS_TRANSFER_BUFFER_SIZE];
+    unsigned char saved[ZFS_TRANSFER_BUFFER_SIZE];
+    uint64_t size = (uint64_t) partition_info.sectors * DISK_SECTOR_SIZE;
+    uint64_t offset = (uint64_t) partition_info.start_lba * DISK_SECTOR_SIZE;
     for (uint64_t at = 0; status == ZFS_OK && at < size; at += sizeof(original)) {
         size_t n = size - at < sizeof(original) ? (size_t) (size - at) : sizeof(original);
         status = zfs_core_read(disk, offset + at, original, n, error);
@@ -488,7 +489,8 @@ zfs_status zfs_merge_check_backup(zfs_merge_plan* plan, const char* backup, zfs_
     }
     char resolved[ZFS_PATH_MAX];
     status = destination(plan->target, backup, resolved, error);
-    return status != ZFS_OK ? status : backup_space(resolved, (uint64_t) plan->partition.sectors * 512, error);
+    return status != ZFS_OK ? status
+                            : backup_space(resolved, (uint64_t) plan->partition.sectors * DISK_SECTOR_SIZE, error);
 }
 
 zfs_status zfs_merge_stage(zfs_merge_plan* plan, const char* backup, zfs_error* error)
@@ -515,7 +517,7 @@ zfs_status zfs_merge_stage(zfs_merge_plan* plan, const char* backup, zfs_error* 
         }
         snprintf(plan->report->backup, sizeof(plan->report->backup), "%s", resolved);
         plan->report->backup_created = true;
-        plan->report->backup_bytes = (uint64_t) plan->partition.sectors * 512;
+        plan->report->backup_bytes = (uint64_t) plan->partition.sectors * DISK_SECTOR_SIZE;
     }
     zfs_disk* disk = plan->target;
     zfs_core_attach(disk, plan->view);
@@ -523,8 +525,8 @@ zfs_status zfs_merge_stage(zfs_merge_plan* plan, const char* backup, zfs_error* 
     plan->report->staged = true;
     snprintf(disk->recovery_backup, sizeof(disk->recovery_backup), "%s", resolved);
     disk->recovery_partition = plan->report->target_partition;
-    disk->recovery_offset = (uint64_t) plan->partition.start_lba * 512;
-    disk->recovery_size = (uint64_t) plan->partition.sectors * 512;
+    disk->recovery_offset = (uint64_t) plan->partition.start_lba * DISK_SECTOR_SIZE;
+    disk->recovery_size = (uint64_t) plan->partition.sectors * DISK_SECTOR_SIZE;
     disk->recovery_is_merge = backup != NULL;
     return ZFS_OK;
 }
@@ -550,7 +552,7 @@ zfs_status zfs_restore_prepare(const char* backup, zfs_disk* target, int target_
     status = create_plan(source, 0, target, target_partition, true, out, report, error);
     if (status == ZFS_OK) {
         zfs_merge_plan* plan = *out;
-        uint64_t size = (uint64_t) plan->partition.sectors * 512;
+        uint64_t size = (uint64_t) plan->partition.sectors * DISK_SECTOR_SIZE;
         if (source->info.size != size) {
             status = zfs_error_set(error, ZFS_INVALID, "Backup capacity must exactly match the target partition");
         }
@@ -558,7 +560,11 @@ zfs_status zfs_restore_prepare(const char* backup, zfs_disk* target, int target_
             status = validate_tree(source, 0, "/", error);
         }
         if (status == ZFS_OK) {
-            status = zfs_core_stage_raw(plan->view, (uint64_t) plan->partition.start_lba * 512, source, size, error);
+            status = zfs_core_stage_raw(plan->view,
+                                        (uint64_t) plan->partition.start_lba * DISK_SECTOR_SIZE,
+                                        source,
+                                        size,
+                                        error);
         }
         if (status == ZFS_OK && (!zfs_core_unchanged(source) || !zfs_core_unchanged(target))) {
             status = zfs_error_set(error, ZFS_BUSY, "Source or target changed during restore preparation");

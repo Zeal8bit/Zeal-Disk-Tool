@@ -6,6 +6,11 @@
 #include "internal.h"
 #include <string.h>
 
+/* Bound each synchronous device I/O request; this is not the sector size. */
+#define DEVICE_IO_CHUNK_SIZE (1024 * 1024)
+/* Scratch storage for the variable-length Windows volume extent query. */
+#define VOLUME_EXTENTS_BUFFER_SIZE (64 * 1024)
+
 static zfs_status win_error(zfs_error* error, const char* operation)
 {
     DWORD code = GetLastError();
@@ -45,7 +50,8 @@ zfs_status zfs_native_open(const char* path, bool writing, zfs_native* fd, uint6
                         &bytes_returned,
                         NULL) != 0;
     *size = ok ? (uint64_t) length.Length.QuadPart : 0;
-    if (ok == 0 || geometry.BytesPerSector != 512 || *size < 512 || *size > ZFS_MAX_DISK_SIZE) {
+    if (ok == 0 || geometry.BytesPerSector != DISK_SECTOR_SIZE || *size < DISK_SECTOR_SIZE ||
+        *size > ZFS_MAX_DISK_SIZE) {
         CloseHandle(*fd);
         *fd = INVALID_HANDLE_VALUE;
         return zfs_error_set(error,
@@ -64,7 +70,7 @@ static zfs_status io(zfs_native fd, uint64_t offset, void* data, size_t size, bo
     }
     while (size != 0) {
         DWORD bytes_transferred = 0;
-        DWORD chunk = size > 1048576 ? 1048576 : (DWORD) size;
+        DWORD chunk = size > DEVICE_IO_CHUNK_SIZE ? DEVICE_IO_CHUNK_SIZE : (DWORD) size;
         BOOL ok = writing ? WriteFile(fd, data, chunk, &bytes_transferred, NULL)
                           : ReadFile(fd, data, chunk, &bytes_transferred, NULL);
         if (ok == 0 || bytes_transferred != chunk) {
@@ -180,7 +186,7 @@ static zfs_status unmounted(HANDLE disk, zfs_error* error)
 
         union {
             VOLUME_DISK_EXTENTS alignment;
-            unsigned char bytes[65536];
+            unsigned char bytes[VOLUME_EXTENTS_BUFFER_SIZE];
         } buffer;
 
         BOOL ok = DeviceIoControl(volume_handle,

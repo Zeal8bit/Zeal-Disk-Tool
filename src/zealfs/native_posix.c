@@ -35,7 +35,7 @@ zfs_status zfs_native_open(const char* path, bool write_access, zfs_native* fd, 
 #else
     ok = ok && S_ISBLK(st.st_mode) && ioctl(*fd, (int) BLKGETSIZE64, size) == 0 && ioctl(*fd, BLKSSZGET, &block) == 0;
 #endif
-    if (!ok || block != 512 || *size < 512 || *size > ZFS_MAX_DISK_SIZE) {
+    if (!ok || block != DISK_SECTOR_SIZE || *size < DISK_SECTOR_SIZE || *size > ZFS_MAX_DISK_SIZE) {
         close(*fd);
         *fd = ZFS_NATIVE_INVALID;
         return zfs_error_set(error,
@@ -116,6 +116,8 @@ bool zfs_native_same(zfs_native first_device, zfs_native second_device)
 #ifndef __APPLE__
 static bool has_holders(const char* path)
 {
+    /* sysfs holders are device-mapper/RAID users that claim a block device,
+     * even if the underlying disk does not appear directly in mountinfo. */
     char holders[ZFS_PATH_MAX];
     if (snprintf(holders, sizeof(holders), "%s/holders", path) >= (int) sizeof(holders)) {
         return true;
@@ -181,6 +183,8 @@ static zfs_status unmounted(zfs_native fd, const char* path, zfs_error* error)
     if (fstat(fd, &st)) {
         return zfs_error_set(error, ZFS_IO, "Cannot identify device");
     }
+    /* Resolve major:minor to its sysfs topology path so partition descendants
+     * can be matched to the selected whole disk. */
     snprintf(link, sizeof(link), "/sys/dev/block/%u:%u", major(st.st_rdev), minor(st.st_rdev));
     if (realpath(link, device) == NULL) {
         return zfs_error_set(error, ZFS_BUSY, "Cannot inspect device topology");
@@ -191,6 +195,8 @@ static zfs_status unmounted(zfs_native fd, const char* path, zfs_error* error)
         access(partition, F_OK) == 0) {
         return zfs_error_set(error, ZFS_INVALID, "Select the whole disk, not a partition device");
     }
+    /* Check mounted filesystems in this process's mount namespace by device
+     * number, rather than depending on /dev aliases or mount-point names. */
     FILE* mounts = fopen("/proc/self/mountinfo", "r");
     if (mounts == NULL) {
         return zfs_error_set(error, ZFS_BUSY, "Cannot inspect mounted filesystems");

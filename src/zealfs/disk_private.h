@@ -15,8 +15,8 @@ struct zfs_disk {
     zfs_info info;
     zfs_info original;
     FILE* base;
-    FILE* overlay;
-    FILE* undo;
+    FILE* overlay; /* Staged sector bytes at their original disk offsets. */
+    FILE* undo;    /* Before-images and dirty flags for the current API operation. */
     zfs_native device;
     uint8_t* dirty;
     uint64_t dirty_count;
@@ -24,9 +24,9 @@ struct zfs_disk {
     uint64_t revision;
     size_t bitmap_size;
     zfs_callbacks callbacks;
-    bool usage_cached[4];
-    uint64_t free_cache[4];
-    uint64_t total_cache[4];
+    bool usage_cached[ZFS_MAX_PARTITIONS];
+    uint64_t free_cache[ZFS_MAX_PARTITIONS];
+    uint64_t total_cache[ZFS_MAX_PARTITIONS];
     struct stat stamp;
 #ifdef _WIN32
     BY_HANDLE_FILE_INFORMATION win_stamp;
