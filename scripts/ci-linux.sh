@@ -13,9 +13,9 @@ case "$(uname -m)" in
     *) raylib_gl=3.3 ;;
 esac
 mkdir -p build/deps
-curl -fL https://github.com/raysan5/raylib/archive/refs/tags/5.5.tar.gz -o build/deps/raylib.tar.gz
+curl -fL https://github.com/raysan5/raylib/archive/refs/tags/6.2.tar.gz -o build/deps/raylib.tar.gz
 tar -xzf build/deps/raylib.tar.gz -C build/deps
-cmake -S build/deps/raylib-5.5 -B build/deps/raylib-build -G Ninja \
+cmake -S build/deps/raylib-6.2 -B build/deps/raylib-build -G Ninja \
     -DBUILD_EXAMPLES=OFF -DBUILD_SHARED_LIBS=OFF -DOPENGL_VERSION="$raylib_gl" -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="$PWD/build/deps/raylib-install"
 cmake --build build/deps/raylib-build --parallel 2

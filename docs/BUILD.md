@@ -36,6 +36,9 @@ cmake -S . -B build/default \
   -DRAYLIB_LIBRARY=/path/to/raylib/lib/libraylib.a
 ```
 
+CI builds use the published Raylib 6.2 release on every platform. This CI choice
+does not impose an exact version restriction on local builds.
+
 The independent options `ZEALFS_BUILD_GUI`, `ZEALFS_BUILD_CLI`, and `ZEALFS_BUILD_TESTS` default to `ON`. The GUI executable remains `zeal_disk_tool`; the CLI is `zdt` (`.exe` on Windows). Version headers, dependencies, icons and packages stay under the build directory.
 
 Install Raylib using your platform's package manager or build it from its source. On Linux ARM, add `-DOPENGL_VERSION=2.1` when configuring Raylib to cover the Pi 3 as well as Pi 4/5. Linux GUI prerequisites are a C compiler plus the OpenGL, X11, Xrandr, Xi, Xinerama, Xcursor, ALSA and pthread development libraries. See [scripts/ci-linux.sh](../scripts/ci-linux.sh) for the Ubuntu/Debian package list. macOS needs Xcode command-line tools. Windows native builds use MSYS2 UCRT64 GCC, CMake and Ninja.

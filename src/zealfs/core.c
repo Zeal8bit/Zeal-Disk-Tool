@@ -649,6 +649,139 @@ static zfs_status verify_original_device(zfs_disk* disk, zfs_error* error)
     return status;
 }
 
+/* Publish a complete replacement image before clearing staged state. */
+static zfs_status apply_image(zfs_disk* disk, zfs_error* error)
+{
+    zfs_status status = ZFS_OK;
+    if (!disk->info.new_image) {
+        status = zfs_core_guard(disk, true, error);
+        if (status != ZFS_OK) {
+            return status;
+        }
+    }
+    char temporary[ZFS_PATH_MAX];
+    FILE* dest = zfs_temp_sibling(disk->info.path, temporary, sizeof(temporary));
+    if (dest == NULL) {
+        return sys_error(error, "Cannot create temporary destination image");
+    }
+    uint8_t buffer[ZFS_TRANSFER_BUFFER_SIZE];
+    for (uint64_t offset = 0; offset < disk->info.size && status == ZFS_OK; offset += sizeof(buffer)) {
+        size_t n = (size_t) MIN(disk->info.size - offset, sizeof(buffer));
+        status = bytes_io(disk, offset, buffer, n, DISK_READ, error);
+        if (status == ZFS_OK && fwrite(buffer, 1, n, dest) != n) {
+            status = sys_error(error, "Cannot write replacement image");
+        }
+        progress(disk, offset + n, disk->info.size);
+    }
+    if (status == ZFS_OK && zfs_host_sync(dest) != 0) {
+        status = sys_error(error, "Cannot flush replacement image");
+    }
+    if (status == ZFS_OK && disk->verified_apply) {
+        status = verify_staged(disk, dest, ZFS_NATIVE_INVALID, error);
+    }
+    if (status == ZFS_OK && disk->guarded) {
+        zfs_native fd = image_handle(dest);
+        status = zfs_native_guard(&fd, temporary, true, true, error);
+    }
+    if (status == ZFS_OK && !disk->info.new_image && !same_image(disk)) {
+        status = zfs_error_set(error, ZFS_BUSY, "Image changed while preparing Apply");
+    }
+    if (status == ZFS_OK) {
+        if (disk->base != NULL) {
+            fclose(disk->base);
+            disk->base = NULL;
+        }
+        if (zfs_host_publish(temporary, disk->info.path, !disk->info.new_image) != 0) {
+#ifdef _WIN32
+            status = zfs_error_set(error,
+                                   ZFS_IO,
+                                   "Cannot publish image (Windows error %lu)",
+                                   (unsigned long) GetLastError());
+#else
+            status = zfs_error_set(error, ZFS_IO, "Cannot publish image (destination exists or replacement failed)");
+#endif
+            if (!disk->info.new_image) {
+                disk->base = zfs_host_open(disk->info.path, "rb");
+                disk->guarded = false;
+                if (disk->base == NULL || zfs_core_guard(disk, true, NULL) != ZFS_OK) {
+                    disk->info.failed = true;
+                }
+            }
+        } else {
+            disk->base = dest;
+            dest = NULL;
+        }
+    }
+    if (dest != NULL) {
+        fclose(dest);
+    }
+    if (status != ZFS_OK) {
+        zfs_host_remove(temporary);
+        return status;
+    }
+    save_stamp(disk);
+    return ZFS_OK;
+}
+
+/* Physical writes cannot be rolled back; keep failures and recovery state. */
+static zfs_status apply_device(zfs_disk* disk, zfs_error* error)
+{
+    zfs_status status = ZFS_OK;
+    bool held = disk->guarded && disk->guard_write;
+    zfs_native fd = held ? disk->device : ZFS_NATIVE_INVALID;
+    uint64_t size = disk->info.size;
+    if (!held) {
+        /* Reopen the disk to write it back */
+        status = zfs_native_open(disk->info.path, true, &fd, &size, error);
+    }
+    if (status != ZFS_OK) {
+        return status;
+    }
+    if (size != disk->info.size || !zfs_native_same(disk->device, fd)) {
+        if (!held) {
+            zfs_native_close(fd);
+        }
+        return zfs_error_set(error, ZFS_BUSY, "Device identity or size changed");
+    }
+    if (disk->verified_apply && disk->recovery_is_merge) {
+        status = verify_original_device(disk, error);
+    }
+    if (status != ZFS_OK) {
+        if (!held) {
+            zfs_native_close(fd);
+        }
+        return status;
+    }
+    uint8_t sector[DISK_SECTOR_SIZE];
+    uint64_t completed = 0;
+    for (uint64_t i = 0; i < disk->info.size / DISK_SECTOR_SIZE && status == ZFS_OK; ++i) {
+        if (dirty(disk, i)) {
+            status = read_sector(disk, i, sector, error);
+            if (status == ZFS_OK) {
+                status = zfs_native_write(fd, i * DISK_SECTOR_SIZE, sector, DISK_SECTOR_SIZE, error);
+            }
+            progress(disk, ++completed, disk->dirty_count);
+        }
+    }
+    if (status == ZFS_OK) {
+        status = zfs_native_sync(fd, error);
+    }
+    if (status == ZFS_OK && disk->verified_apply) {
+        status = verify_staged(disk, NULL, fd, error);
+    }
+    if (!held) {
+        zfs_native_close(fd);
+    }
+    if (status != ZFS_OK) {
+        disk->info.failed = true;
+        return zfs_error_set(error,
+                             ZFS_PARTIAL_WRITE,
+                             "Apply or readback failed; device may be partially updated. Reopen it "
+                             "before restoring from the retained backup");
+    }
+    return ZFS_OK;
+}
+
 zfs_status zfs_apply(zfs_disk* disk, zfs_error* error)
 {
     if (disk == NULL) {
@@ -660,129 +793,9 @@ zfs_status zfs_apply(zfs_disk* disk, zfs_error* error)
     if (!disk->info.pending) {
         return ZFS_OK;
     }
-    zfs_status status = ZFS_OK;
-    if (disk->info.image) {
-        if (!disk->info.new_image) {
-            status = zfs_core_guard(disk, true, error);
-            if (status != ZFS_OK) {
-                return status;
-            }
-        }
-        char temporary[ZFS_PATH_MAX];
-        FILE* dest = zfs_temp_sibling(disk->info.path, temporary, sizeof(temporary));
-        if (dest == NULL) {
-            return sys_error(error, "Cannot create temporary destination image");
-        }
-        uint8_t buffer[ZFS_TRANSFER_BUFFER_SIZE];
-        for (uint64_t offset = 0; offset < disk->info.size && status == ZFS_OK; offset += sizeof(buffer)) {
-            size_t n = (size_t) MIN(disk->info.size - offset, sizeof(buffer));
-            status = bytes_io(disk, offset, buffer, n, DISK_READ, error);
-            if (status == ZFS_OK && fwrite(buffer, 1, n, dest) != n) {
-                status = sys_error(error, "Cannot write replacement image");
-            }
-            progress(disk, offset + n, disk->info.size);
-        }
-        if (status == ZFS_OK && zfs_host_sync(dest) != 0) {
-            status = sys_error(error, "Cannot flush replacement image");
-        }
-        if (status == ZFS_OK && disk->verified_apply) {
-            status = verify_staged(disk, dest, ZFS_NATIVE_INVALID, error);
-        }
-        if (status == ZFS_OK && disk->guarded) {
-            zfs_native fd = image_handle(dest);
-            status = zfs_native_guard(&fd, temporary, true, true, error);
-        }
-        if (status == ZFS_OK && !disk->info.new_image && !same_image(disk)) {
-            status = zfs_error_set(error, ZFS_BUSY, "Image changed while preparing Apply");
-        }
-        if (status == ZFS_OK) {
-            if (disk->base != NULL) {
-                fclose(disk->base);
-                disk->base = NULL;
-            }
-            if (zfs_host_publish(temporary, disk->info.path, !disk->info.new_image) != 0) {
-#ifdef _WIN32
-                status = zfs_error_set(error,
-                                       ZFS_IO,
-                                       "Cannot publish image (Windows error %lu)",
-                                       (unsigned long) GetLastError());
-#else
-                status =
-                    zfs_error_set(error, ZFS_IO, "Cannot publish image (destination exists or replacement failed)");
-#endif
-                if (!disk->info.new_image) {
-                    disk->base = zfs_host_open(disk->info.path, "rb");
-                    disk->guarded = false;
-                    if (disk->base == NULL || zfs_core_guard(disk, true, NULL) != ZFS_OK) {
-                        disk->info.failed = true;
-                    }
-                }
-            } else {
-                disk->base = dest;
-                dest = NULL;
-            }
-        }
-        if (dest != NULL) {
-            fclose(dest);
-        }
-        if (status != ZFS_OK) {
-            zfs_host_remove(temporary);
-            return status;
-        }
-        save_stamp(disk);
-    } else {
-        bool held = disk->guarded && disk->guard_write;
-        zfs_native fd = held ? disk->device : ZFS_NATIVE_INVALID;
-        uint64_t size = disk->info.size;
-        if (!held) {
-            /* Reopen the disk to write it back */
-            status = zfs_native_open(disk->info.path, true, &fd, &size, error);
-        }
-        if (status != ZFS_OK) {
-            return status;
-        }
-        if (size != disk->info.size || !zfs_native_same(disk->device, fd)) {
-            if (!held) {
-                zfs_native_close(fd);
-            }
-            return zfs_error_set(error, ZFS_BUSY, "Device identity or size changed");
-        }
-        if (disk->verified_apply && disk->recovery_is_merge) {
-            status = verify_original_device(disk, error);
-        }
-        if (status != ZFS_OK) {
-            if (!held) {
-                zfs_native_close(fd);
-            }
-            return status;
-        }
-        uint8_t sector[DISK_SECTOR_SIZE];
-        uint64_t completed = 0;
-        for (uint64_t i = 0; i < disk->info.size / DISK_SECTOR_SIZE && status == ZFS_OK; ++i) {
-            if (dirty(disk, i)) {
-                status = read_sector(disk, i, sector, error);
-                if (status == ZFS_OK) {
-                    status = zfs_native_write(fd, i * DISK_SECTOR_SIZE, sector, DISK_SECTOR_SIZE, error);
-                }
-                progress(disk, ++completed, disk->dirty_count);
-            }
-        }
-        if (status == ZFS_OK) {
-            status = zfs_native_sync(fd, error);
-        }
-        if (status == ZFS_OK && disk->verified_apply) {
-            status = verify_staged(disk, NULL, fd, error);
-        }
-        if (!held) {
-            zfs_native_close(fd);
-        }
-        if (status != ZFS_OK) {
-            disk->info.failed = true;
-            return zfs_error_set(error,
-                                 ZFS_PARTIAL_WRITE,
-                                 "Apply or readback failed; device may be partially updated. Reopen it "
-                                 "before restoring from the retained backup");
-        }
+    zfs_status status = disk->info.image ? apply_image(disk, error) : apply_device(disk, error);
+    if (status != ZFS_OK) {
+        return status;
     }
     /* Apply the changes in RAM too */
     disk->info.new_image = false;

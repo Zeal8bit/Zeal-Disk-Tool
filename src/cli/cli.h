@@ -8,6 +8,9 @@
 /* Private frontend types. Disk and filesystem behavior belongs to zealfs_core. */
 #include "disk_tool.h"
 #define CLI_MAX_ARGS 64
+/* A host path can use nearly ZFS_PATH_MAX bytes; leave room for command names,
+ * quoting, destination paths and multiple import sources. This bounds shell
+ * input/history only; one-shot argv follows the host operating system limits. */
 #define CLI_LINE_CAPACITY 8192
 #define CLI_HISTORY_LIMIT 32
 

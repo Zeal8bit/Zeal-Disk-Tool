@@ -664,10 +664,7 @@ static bool ui_can_quit(void)
                  "Pending changes on %.800s. Apply before quitting?\nYes: apply. No: discard. Cancel: keep editing.",
                  disk->name);
         int answer = tinyfd_messageBox("Unsaved changes", message, "yesnocancel", "question", 0);
-        if (!answer) {
-            return false;
-        }
-        if (answer == 1 && disk_write_changes(disk)) {
+        if (answer == 0 || (answer == 1 && disk_write_changes(disk) != NULL)) {
             return false;
         }
     }

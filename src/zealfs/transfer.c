@@ -126,7 +126,12 @@ static zfs_status add_action(zfs_merge_plan* plan, const char* path, bool direct
     if (name == NULL) {
         return zfs_error_set(error, ZFS_NO_MEMORY, "Cannot allocate merge path");
     }
-    plan->actions[plan->count++] = (action){name, directory, replace};
+    /* The plan owns name from here; zfs_merge_plan_free releases each path. */
+    plan->actions[plan->count++] = (action){
+        .path = name,
+        .directory = directory,
+        .replace = replace,
+    };
     return ZFS_OK;
 }
 
@@ -144,6 +149,8 @@ static zfs_status conflict(zfs_merge_report* report, const char* path, zfs_error
     if (name == NULL) {
         return zfs_error_set(error, ZFS_NO_MEMORY, "Cannot allocate conflict path");
     }
+    /* The report owns name; callers free it with zfs_merge_report_free,
+     * including after preparation fails. */
     report->conflicts[report->conflict_count++] = name;
     return ZFS_OK;
 }

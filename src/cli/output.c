@@ -3,6 +3,10 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
+/* CLI presentation for disk metadata, listings, transfer reports and errors.
+ * Human-readable text serves interactive use; JSON gives CI and ZDE host scripts
+ * structured results without parsing display text. Keep formatting and escaping
+ * here so the shared disk API remains independent of console I/O. */
 #include "cli.h"
 #include <inttypes.h>
 #include <stdio.h>

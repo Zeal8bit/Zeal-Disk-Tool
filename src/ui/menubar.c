@@ -22,6 +22,7 @@ void ui_menubar_create_mbr(struct nk_context *ctx, disk_info_t* disk)
         } else if (disk->has_staged_changes) {
             info.msg = "Disk has staged changes, cannot proceed. Apply or cancel the changes first";
         } else {
+            /* MBR creation is staged and can be discarded until Apply. */
             info.msg = "Stage a new MBR? Use Apply to write it to disk, or Cancel to discard it.";
             info.data = (void*) 1;
         }
