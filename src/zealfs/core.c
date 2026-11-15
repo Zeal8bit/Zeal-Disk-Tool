@@ -46,6 +46,27 @@ typedef struct {
     zealfs_context_t fs;
 } filesystem;
 
+/* Private consumers share the chunk reader; only comparisons need a second buffer. */
+typedef zfs_status (*file_chunk_fn)(void* user, const uint8_t* data, size_t size, uint64_t offset, zfs_error* error);
+
+typedef struct {
+    file_chunk_fn consume;
+    void* user;
+    const char* read_error;
+    bool report_progress;
+} file_chunk_consumer;
+
+typedef struct {
+    FILE* file;
+    const char* write_error;
+} file_output;
+
+typedef struct {
+    filesystem* target_fs;
+    zealfs_fd_t* target_file;
+    bool same;
+} file_comparison;
+
 static uint32_t le32(const uint8_t* bytes)
 {
     return (uint32_t) bytes[0] | ((uint32_t) bytes[1] << 8) | ((uint32_t) bytes[2] << 16) | ((uint32_t) bytes[3] << 24);
@@ -1587,6 +1608,55 @@ zfs_status zfs_core_path_directory(zfs_disk* disk, int part, const char* path, b
     return status;
 }
 
+/* Read the complete file, including after a comparison mismatch, so a later
+ * read error cannot be mistaken for a valid file with different contents. */
+static zfs_status read_file_chunks(filesystem* fs, zealfs_fd_t* file, const file_chunk_consumer* consumer,
+                                   zfs_error* error)
+{
+    uint8_t source_buffer[ZFS_TRANSFER_BUFFER_SIZE];
+    uint64_t offset = 0;
+    zfs_status status = ZFS_OK;
+
+    while (status == ZFS_OK && offset < file->entry.size) {
+        size_t chunk_size = (size_t) MIN(file->entry.size - offset, sizeof(source_buffer));
+        int bytes_read = zealfs_read(&fs->fs, file, source_buffer, chunk_size, (int64_t) offset);
+        if (bytes_read != (int) chunk_size) {
+            status =
+                bytes_read < 0 ? fs_error(bytes_read, error) : zfs_error_set(error, ZFS_IO, "%s", consumer->read_error);
+        } else if (consumer->consume != NULL) {
+            status = consumer->consume(consumer->user, source_buffer, chunk_size, offset, error);
+        }
+        offset += chunk_size;
+        if (consumer->report_progress) {
+            progress(fs->disk, offset, file->entry.size);
+        }
+    }
+    return status;
+}
+
+static zfs_status write_file_chunk(void* user, const uint8_t* data, size_t size, uint64_t offset, zfs_error* error)
+{
+    file_output* output = user;
+    (void) offset;
+    return fwrite(data, 1, size, output->file) == size ? ZFS_OK : sys_error(error, output->write_error);
+}
+
+static zfs_status compare_file_chunk(void* user, const uint8_t* data, size_t size, uint64_t offset, zfs_error* error)
+{
+    file_comparison* comparison = user;
+    uint8_t target_buffer[ZFS_TRANSFER_BUFFER_SIZE];
+    int bytes_read =
+        zealfs_read(&comparison->target_fs->fs, comparison->target_file, target_buffer, size, (int64_t) offset);
+
+    if (bytes_read != (int) size) {
+        return bytes_read < 0 ? fs_error(bytes_read, error) : zfs_error_set(error, ZFS_IO, "Short file read");
+    }
+    if (memcmp(data, target_buffer, size) != 0) {
+        comparison->same = false;
+    }
+    return ZFS_OK;
+}
+
 zfs_status zfs_core_export_file(zfs_disk* disk, int part, const char* path, const char* host, bool overwrite,
                                 zfs_error* error)
 {
@@ -1628,21 +1698,18 @@ zfs_status zfs_core_export_file(zfs_disk* disk, int part, const char* path, cons
         free(fs);
         return sys_error(error, "Cannot create export destination");
     }
-    uint64_t offset = 0;
-    uint8_t buffer[ZFS_TRANSFER_BUFFER_SIZE];
+    file_output output = {
+        .file = dest,
+        .write_error = "Export write failed",
+    };
+    const file_chunk_consumer consumer = {
+        .consume = write_file_chunk,
+        .user = &output,
+        .read_error = "Short read during export",
+        .report_progress = true,
+    };
     /* Write the file chunk by chunk */
-    while (status == ZFS_OK && offset < fd.entry.size) {
-        size_t chunk_size = (size_t) MIN(fd.entry.size - offset, sizeof(buffer));
-        bytes_read = zealfs_read(&fs->fs, &fd, buffer, chunk_size, (int64_t) offset);
-        if (bytes_read != (int) chunk_size) {
-            status =
-                bytes_read < 0 ? fs_error(bytes_read, error) : zfs_error_set(error, ZFS_IO, "Short read during export");
-        } else if (fwrite(buffer, 1, chunk_size, dest) != chunk_size) {
-            status = sys_error(error, "Export write failed");
-        }
-        offset += chunk_size;
-        progress(disk, offset, fd.entry.size);
-    }
+    status = read_file_chunks(fs, &fd, &consumer, error);
     if (status == ZFS_OK && zfs_host_sync(dest) != 0) {
         status = sys_error(error, "Export flush failed");
     }
@@ -1834,18 +1901,17 @@ zfs_status zfs_core_copy_file(zfs_disk* source, int source_partition, zfs_disk* 
     if (status == ZFS_OK && spool == NULL) {
         status = sys_error(error, "Cannot create transfer spool");
     }
-    uint8_t buffer[ZFS_TRANSFER_BUFFER_SIZE];
-    for (uint64_t offset = 0; status == ZFS_OK && offset < source_file.entry.size;) {
-        size_t chunk_size = source_file.entry.size - offset < sizeof(buffer)
-                                ? (size_t) (source_file.entry.size - offset)
-                                : sizeof(buffer);
-        int bytes_read = zealfs_read(&source_fs->fs, &source_file, buffer, chunk_size, (int64_t) offset);
-        if (bytes_read != (int) chunk_size) {
-            status = bytes_read < 0 ? fs_error(bytes_read, error) : zfs_error_set(error, ZFS_IO, "Short source read");
-        } else if (fwrite(buffer, 1, chunk_size, spool) != chunk_size) {
-            status = sys_error(error, "Transfer spool write failed");
-        }
-        offset += chunk_size;
+    file_output output = {
+        .file = spool,
+        .write_error = "Transfer spool write failed",
+    };
+    const file_chunk_consumer consumer = {
+        .consume = write_file_chunk,
+        .user = &output,
+        .read_error = "Short source read",
+    };
+    if (status == ZFS_OK) {
+        status = read_file_chunks(source_fs, &source_file, &consumer, error);
     }
     if (status == ZFS_OK && zfs_seek(spool, 0) != 0) {
         status = sys_error(error, "Transfer spool seek failed");
@@ -1891,28 +1957,20 @@ zfs_status zfs_core_files_equal(zfs_partition_ref source, zfs_partition_ref targ
         free(target_fs);
         return ZFS_OK;
     }
-    uint8_t source_buffer[ZFS_TRANSFER_BUFFER_SIZE];
-    uint8_t target_buffer[ZFS_TRANSFER_BUFFER_SIZE];
-    bool same = true;
-    for (uint64_t offset = 0; status == ZFS_OK && offset < source_file.entry.size;) {
-        size_t chunk_size = source_file.entry.size - offset < sizeof(source_buffer)
-                                ? (size_t) (source_file.entry.size - offset)
-                                : sizeof(source_buffer);
-        int bytes_read = zealfs_read(&source_fs->fs, &source_file, source_buffer, chunk_size, (int64_t) offset);
-        if (bytes_read != (int) chunk_size) {
-            status = bytes_read < 0 ? fs_error(bytes_read, error) : zfs_error_set(error, ZFS_IO, "Short file read");
-        }
-        if (status == ZFS_OK && target.disk != NULL) {
-            bytes_read = zealfs_read(&target_fs->fs, &target_file, target_buffer, chunk_size, (int64_t) offset);
-            if (bytes_read != (int) chunk_size) {
-                status = bytes_read < 0 ? fs_error(bytes_read, error) : zfs_error_set(error, ZFS_IO, "Short file read");
-            } else if (memcmp(source_buffer, target_buffer, chunk_size) != 0) {
-                same = false;
-            }
-        }
-        offset += chunk_size;
+    file_comparison comparison = {
+        .target_fs = target_fs,
+        .target_file = &target_file,
+        .same = true,
+    };
+    const file_chunk_consumer consumer = {
+        .consume = target.disk != NULL ? compare_file_chunk : NULL,
+        .user = &comparison,
+        .read_error = "Short file read",
+    };
+    if (status == ZFS_OK) {
+        status = read_file_chunks(source_fs, &source_file, &consumer, error);
     }
-    *equal = status == ZFS_OK && same;
+    *equal = status == ZFS_OK && comparison.same;
     free(source_fs);
     free(target_fs);
     return status;

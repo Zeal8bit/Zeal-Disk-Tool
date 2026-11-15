@@ -185,6 +185,44 @@ with tempfile.TemporaryDirectory(prefix="zdt-merge-") as tmp:
     script = f'mkdir dirty\nmerge --from-image "{source}" --partition 1 --backup "{dirty_backup}"\ndiscard\nquit\n'
     run("-i", target, "shell", data=script, code=1)
     assert not dirty_backup.exists() and target.read_bytes() == original
+    # Chunked reads must compare past the first chunk, copy complete files, and
+    # handle empty files without invoking a data consumer.
+    chunk_source, chunk_target = root/"chunks-source.img", root/"chunks-target.img"
+    for path in (chunk_source, chunk_target):
+        image(path, "2MiB", partitions=("1MiB",))
+    payload = bytes(range(256)) * 513 + b"tail"
+    replacement = payload[:-1] + b"!"
+    for path in (chunk_source, chunk_target):
+        put(path, "same", payload, root)
+        put(path, "changed", payload, root)
+    put(chunk_source, "changed", replacement, root)
+    put(chunk_source, "new", payload, root)
+    put(chunk_source, "empty", b"", root)
+    before_chunks = chunk_target.read_bytes()
+    preview = report("-i", chunk_target, "merge", "--from-image", chunk_source, "--dry-run")["data"]
+    assert preview["files_added"] == 2 and preview["files_replaced"] == 1 and preview["files_unchanged"] == 1
+    assert chunk_target.read_bytes() == before_chunks
+    report("-i", chunk_target, "merge", "--from-image", chunk_source, "--yes")
+    chunk_exports = root/"chunk-exports"
+    run("-i", chunk_target, "export", "/", chunk_exports)
+    for name, expected in {"same": payload, "changed": replacement, "new": payload, "empty": b""}.items():
+        assert (chunk_exports/name).read_bytes() == expected
+    repeated = report("-i", chunk_target, "merge", "--from-image", chunk_source, "--dry-run")["data"]
+    assert repeated["noop"] and repeated["files_unchanged"] == 4
+    # Claim one byte beyond the allocated chain: early chunks are readable but
+    # the final read must fail. Preflight must retain both host and target data.
+    broken = bytearray(chunk_source.read_bytes())
+    partition_offset, _ = partition_range(broken)
+    page_size = 256 << broken[partition_offset + 6]
+    invalid_size = ((len(payload) + page_size - 1) // page_size) * page_size + 1
+    # Entry size follows the 16-byte name and the 2-byte start page.
+    struct.pack_into("<I", broken, broken.index(b"changed") + 18, invalid_size)
+    chunk_source.write_bytes(broken)
+    committed_chunks = chunk_target.read_bytes()
+    run("-i", chunk_target, "merge", "--from-image", chunk_source, "--yes", code=1)
+    assert chunk_target.read_bytes() == committed_chunks
+    run("-i", chunk_source, "export", "changed", chunk_exports/"changed", "--yes", code=1)
+    assert (chunk_exports/"changed").read_bytes() == replacement
     # Insufficient capacity is discovered before backup; freeing replaced files
     # first also allows final trees that fit but cannot hold both versions.
     small, big = root/"small.img", root/"big.img"
