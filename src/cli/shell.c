@@ -14,11 +14,11 @@ static int tokenize(char* line, char** args)
     char* read = line;
     char* write = line;
     int count = 0;
-    while (*read) {
-        while (isspace((unsigned char) *read)) {
+    while (*read != 0) {
+        while (isspace((unsigned char) *read) != 0) {
             ++read;
         }
-        if (!*read) {
+        if (*read == 0) {
             break;
         }
         if (count == CLI_MAX_ARGS) {
@@ -26,9 +26,9 @@ static int tokenize(char* line, char** args)
         }
         args[count++] = write;
         char quote = 0;
-        while (*read) {
+        while (*read != 0) {
             char c = *read++;
-            if (quote) {
+            if (quote != 0) {
                 if (c == quote) {
                     quote = 0;
                 } else if (c == '\\' && *read == quote) {
@@ -38,13 +38,13 @@ static int tokenize(char* line, char** args)
                 }
             } else if (c == '\'' || c == '"') {
                 quote = c;
-            } else if (isspace((unsigned char) c)) {
+            } else if (isspace((unsigned char) c) != 0) {
                 break;
             } else {
                 *write++ = c;
             }
         }
-        if (quote) {
+        if (quote != 0) {
             return -1;
         }
         *write++ = 0;
@@ -52,21 +52,21 @@ static int tokenize(char* line, char** args)
     return count;
 }
 
-int cli_shell(cli_session* s, const cli_options* initial)
+int cli_shell(cli_session* session, const cli_options* initial)
 {
     if (initial->json || initial->yes || initial->dry_run) {
         return cli_failure(initial, 2, "usage", "Shell does not accept --json, --yes, or --dry-run");
     }
-    if (initial->target) {
-        zfs_error e;
-        if (zfs_open(initial->target, initial->image, &s->disk, &e)) {
-            return cli_api_failure(initial, &e);
+    if (initial->target != NULL) {
+        zfs_error api_error;
+        if (zfs_open(initial->target, initial->image, &session->disk, &api_error) != ZFS_OK) {
+            return cli_api_failure(initial, &api_error);
         }
     }
-    s->shell = true;
+    session->shell = true;
     bool terminal = cli_is_terminal();
     cli_history* history = calloc(1, sizeof(*history));
-    if (!history) {
+    if (history == NULL) {
         return cli_failure(initial, 1, "out of memory", "Cannot allocate shell history");
     }
     /* Keep terminal editing and confirmation reads on the same input stream. */
@@ -85,7 +85,7 @@ int cli_shell(cli_session* s, const cli_options* initial)
             break;
         }
         if (input == CLI_INPUT_EOF) {
-            if (s->disk && zfs_get_info(s->disk)->pending) {
+            if (session->disk != NULL && zfs_get_info(session->disk)->pending) {
                 result = cli_failure(initial, 3, "confirmation", "End of input: pending changes discarded");
             }
             break;
@@ -103,30 +103,30 @@ int cli_shell(cli_session* s, const cli_options* initial)
             result = cli_failure(initial, 2, "usage", "Unclosed quote or too many arguments");
             continue;
         }
-        if (!argc) {
+        if (argc == 0) {
             continue;
         }
-        cli_options o;
+        cli_options opt;
         char error[256];
-        if (!cli_parse_shell(argc, args, &o, error, sizeof(error))) {
-            result = cli_failure(&o, 2, "usage", error);
+        if (!cli_parse_shell(argc, args, &opt, error, sizeof(error))) {
+            result = cli_failure(&opt, 2, "usage", error);
             continue;
         }
-        if (o.json || o.dry_run || o.yes) {
-            result = cli_failure(&o, 2, "usage", "Shell commands do not accept --json, --dry-run or --yes");
+        if (opt.json || opt.dry_run || opt.yes) {
+            result = cli_failure(&opt, 2, "usage", "Shell commands do not accept --json, --dry-run or --yes");
             continue;
         }
-        if (cli_command_matches(&o, "quit", NULL, 1) || cli_command_matches(&o, "exit", NULL, 1)) {
-            int r = cli_leave_disk(s, &o);
-            if (!r) {
+        if (cli_command_matches(&opt, "quit", NULL, 1) || cli_command_matches(&opt, "exit", NULL, 1)) {
+            int command_result = cli_leave_disk(session, &opt);
+            if (command_result == 0) {
                 break;
             }
-            result = r;
+            result = command_result;
             continue;
         }
-        int r = cli_execute(s, &o);
-        if (r) {
-            result = r;
+        int command_result = cli_execute(session, &opt);
+        if (command_result != 0) {
+            result = command_result;
         }
     }
     free(history);

@@ -10,159 +10,161 @@
 
 static bool size_value(const char* text, uint64_t* value)
 {
-    if (!text || !isdigit((unsigned char) *text)) {
+    if (text == NULL || isdigit((unsigned char) *text) == 0) {
         return false;
     }
     errno = 0;
     char* end;
-    unsigned long long n = strtoull(text, &end, 10);
-    if (errno) {
+    unsigned long long number = strtoull(text, &end, 10);
+    if (errno != 0) {
         return false;
     }
     uint64_t scale = 1;
-    if (!strcmp(end, "KiB")) {
+    if (strcmp(end, "KiB") == 0) {
         scale = 1024;
-    } else if (!strcmp(end, "MiB")) {
+    } else if (strcmp(end, "MiB") == 0) {
         scale = UINT64_C(1024) * 1024;
-    } else if (!strcmp(end, "GiB")) {
+    } else if (strcmp(end, "GiB") == 0) {
         scale = UINT64_C(1024) * 1024 * 1024;
-    } else if (*end && strcmp(end, "B")) {
+    } else if (*end != 0 && strcmp(end, "B") != 0) {
         return false;
     }
-    if (n > UINT64_MAX / scale) {
+    if (number > UINT64_MAX / scale) {
         return false;
     }
-    *value = (uint64_t) n * scale;
+    *value = (uint64_t) number * scale;
     return true;
 }
 
-static bool parse(int argc, char** argv, cli_options* o, char* error, size_t capacity, bool shell)
+static bool parse(int argc, char** argv, cli_options* opt, char* error, size_t capacity, bool shell)
 {
     bool short_target = false;
-    memset(o, 0, sizeof(*o));
-    o->image = true;
-    o->source_image = true;
-    o->source_partition = -1;
-    o->alignment = 1024 * 1024;
+    memset(opt, 0, sizeof(*opt));
+    opt->image = true;
+    opt->source_image = true;
+    opt->source_partition = -1;
+    opt->alignment = 1024 * 1024;
     for (int i = 0; i < argc; ++i) {
-        if (o->argc >= CLI_MAX_ARGS) {
+        if (opt->argc >= CLI_MAX_ARGS) {
             snprintf(error, capacity, "Too many arguments");
             return false;
         }
         const char* arg = argv[i];
-        if (!strcmp(arg, "--json")) {
-            o->json = true;
-        } else if (!strcmp(arg, "--yes")) {
-            o->yes = true;
-        } else if (!strcmp(arg, "--dry-run")) {
-            o->dry_run = true;
-        } else if (!strcmp(arg, "--mbr")) {
-            o->mbr = true;
-        } else if (!strcmp(arg, "--image") || !strcmp(arg, "-i") || !strcmp(arg, "--device") || !strcmp(arg, "-d")) {
-            if (o->target || i + 1 >= argc) {
+        if (strcmp(arg, "--json") == 0) {
+            opt->json = true;
+        } else if (strcmp(arg, "--yes") == 0) {
+            opt->yes = true;
+        } else if (strcmp(arg, "--dry-run") == 0) {
+            opt->dry_run = true;
+        } else if (strcmp(arg, "--mbr") == 0) {
+            opt->mbr = true;
+        } else if (strcmp(arg, "--image") == 0 || strcmp(arg, "-i") == 0 || strcmp(arg, "--device") == 0 ||
+                   strcmp(arg, "-d") == 0) {
+            if (opt->target != NULL || i + 1 >= argc) {
                 snprintf(error, capacity, "Choose exactly one --image (-i) PATH or --device (-d) PATH");
                 return false;
             }
-            o->image = !strcmp(arg, "--image") || !strcmp(arg, "-i");
-            short_target = !strcmp(arg, "-i") || !strcmp(arg, "-d");
-            o->target = argv[++i];
-        } else if (!strcmp(arg, "--from-image") || !strcmp(arg, "-f") || !strcmp(arg, "--from-device")) {
-            if (o->source || i + 1 >= argc) {
+            opt->image = strcmp(arg, "--image") == 0 || strcmp(arg, "-i") == 0;
+            short_target = strcmp(arg, "-i") == 0 || strcmp(arg, "-d") == 0;
+            opt->target = argv[++i];
+        } else if (strcmp(arg, "--from-image") == 0 || strcmp(arg, "-f") == 0 || strcmp(arg, "--from-device") == 0) {
+            if (opt->source != NULL || i + 1 >= argc) {
                 snprintf(error, capacity, "Choose exactly one --from-image PATH or --from-device PATH");
                 return false;
             }
-            o->source_image = !strcmp(arg, "--from-image") || !strcmp(arg, "-f");
-            o->source = argv[++i];
-        } else if (!strcmp(arg, "--backup") || !strcmp(arg, "-b")) {
-            if (o->backup || i + 1 >= argc) {
+            opt->source_image = strcmp(arg, "--from-image") == 0 || strcmp(arg, "-f") == 0;
+            opt->source = argv[++i];
+        } else if (strcmp(arg, "--backup") == 0 || strcmp(arg, "-b") == 0) {
+            if (opt->backup != NULL || i + 1 >= argc) {
                 snprintf(error, capacity, "Specify one --backup PATH");
                 return false;
             }
-            o->backup = argv[++i];
-        } else if (!strcmp(arg, "--size") || !strcmp(arg, "--alignment") ||
-                   (!strcmp(arg, "--partition") || !strcmp(arg, "--from-partition"))) {
-            uint64_t n;
-            if (i + 1 >= argc || !size_value(argv[++i], &n)) {
+            opt->backup = argv[++i];
+        } else if (strcmp(arg, "--size") == 0 || strcmp(arg, "--alignment") == 0 ||
+                   (strcmp(arg, "--partition") == 0 || strcmp(arg, "--from-partition") == 0)) {
+            uint64_t value;
+            if (i + 1 >= argc || !size_value(argv[++i], &value)) {
                 snprintf(error, capacity, "Invalid value for %s", arg);
                 return false;
             }
-            if (!strcmp(arg, "--size")) {
-                o->size = n;
-                o->size_set = true;
-            } else if (!strcmp(arg, "--alignment")) {
-                if (n > UINT32_MAX || n < 512 || (n & (n - 1))) {
+            if (strcmp(arg, "--size") == 0) {
+                opt->size = value;
+                opt->size_set = true;
+            } else if (strcmp(arg, "--alignment") == 0) {
+                if (value > UINT32_MAX || value < 512 || (value & (value - 1)) != 0) {
                     snprintf(error, capacity, "Invalid alignment");
                     return false;
                 }
-                o->alignment = (uint32_t) n;
+                opt->alignment = (uint32_t) value;
             } else {
-                if (n < 1 || n > 4) {
+                if (value < 1 || value > 4) {
                     snprintf(error, capacity, "Partition must be 1–4");
                     return false;
                 }
-                if (!strcmp(arg, "--from-partition")) {
-                    o->source_partition = (int) n - 1;
+                if (strcmp(arg, "--from-partition") == 0) {
+                    opt->source_partition = (int) value - 1;
                 } else {
-                    o->partition = (int) n - 1;
-                    o->partition_set = true;
+                    opt->partition = (int) value - 1;
+                    opt->partition_set = true;
                 }
             }
-        } else if (!strcmp(arg, "--help") || !strcmp(arg, "-h")) {
-            o->argv[o->argc++] = "help";
-        } else if (!strcmp(arg, "--version")) {
-            o->argv[o->argc++] = "version";
+        } else if (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0) {
+            opt->argv[opt->argc++] = "help";
+        } else if (strcmp(arg, "--version") == 0) {
+            opt->argv[opt->argc++] = "version";
         } else if (arg[0] == '-') {
             snprintf(error, capacity, "Unknown option: %s", arg);
             return false;
         } else {
-            if (o->argc == CLI_MAX_ARGS) {
+            if (opt->argc == CLI_MAX_ARGS) {
                 snprintf(error, capacity, "Too many arguments");
                 return false;
             }
-            o->argv[o->argc++] = argv[i];
+            opt->argv[opt->argc++] = argv[i];
         }
     }
     /* Shell merge already has a target; its short disk flags identify the source.
      * Resolve after parsing so options may appear on either side of the command. */
-    if (shell && short_target && cli_command_matches(o, "merge", NULL, 1)) {
-        if (o->source) {
+    if (shell && short_target && cli_command_matches(opt, "merge", NULL, 1)) {
+        if (opt->source != NULL) {
             snprintf(error, capacity, "Choose exactly one merge source image or device");
             return false;
         }
-        o->source = o->target;
-        o->source_image = o->image;
-        o->target = NULL;
+        opt->source = opt->target;
+        opt->source_image = opt->image;
+        opt->target = NULL;
     }
     return true;
 }
 
-bool cli_parse(int argc, char** argv, cli_options* o, char* error, size_t capacity)
+bool cli_parse(int argc, char** argv, cli_options* opt, char* error, size_t capacity)
 {
-    return parse(argc, argv, o, error, capacity, false);
+    return parse(argc, argv, opt, error, capacity, false);
 }
 
-bool cli_parse_shell(int argc, char** argv, cli_options* o, char* error, size_t capacity)
+bool cli_parse_shell(int argc, char** argv, cli_options* opt, char* error, size_t capacity)
 {
-    return parse(argc, argv, o, error, capacity, true);
+    return parse(argc, argv, opt, error, capacity, true);
 }
 
-bool cli_command_matches(const cli_options* o, const char* a, const char* b, int count)
+bool cli_command_matches(const cli_options* opt, const char* command, const char* subcommand, int count)
 {
-    return o->argc == count && !strcmp(o->argv[0], a) && (!b || !strcmp(o->argv[1], b));
+    return opt->argc == count && strcmp(opt->argv[0], command) == 0 &&
+           (subcommand == NULL || strcmp(opt->argv[1], subcommand) == 0);
 }
 
 /* CLI paths are always rooted in the selected filesystem. Host paths are left
  * untouched; the core continues to receive canonical absolute ZealFS paths. */
 bool cli_filesystem_path(const char* input, char output[512])
 {
-    if (!*input) {
+    if (*input == 0) {
         return false;
     }
     while (*input == '/') {
         ++input;
     }
     size_t length = strlen(input);
-    while (length && input[length - 1] == '/') {
+    while (length != 0 && input[length - 1] == '/') {
         --length;
     }
     if (length > 510) {

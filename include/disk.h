@@ -69,19 +69,19 @@ typedef struct {
 
 static inline disk_info_t* disk_get_current(disk_list_state_t* state)
 {
-    return state && state->selected_disk >= 0 && state->selected_disk < state->disk_count
+    return state != NULL && state->selected_disk >= 0 && state->selected_disk < state->disk_count
                ? &state->disks[state->selected_disk]
                : NULL;
 }
 
 static inline int disk_is_valid_zealfs_partition(partition_t* part)
 {
-    return part && part->active && part->type == 0x5a;
+    return part != NULL && part->active && part->type == 0x5a;
 }
 
 static inline int disk_can_be_switched(disk_info_t* disk)
 {
-    return !disk || !disk->has_staged_changes;
+    return disk == NULL || !disk->has_staged_changes;
 }
 
 static inline const char* disk_get_basename(const char* path)
@@ -89,11 +89,11 @@ static inline const char* disk_get_basename(const char* path)
     const char* last_slash = strrchr(path, '/');
 #ifdef _WIN32
     const char* last_backslash = strrchr(path, '\\');
-    if (last_backslash && (!last_slash || last_backslash > last_slash)) {
+    if (last_backslash != NULL && (last_slash == NULL || last_backslash > last_slash)) {
         last_slash = last_backslash;
     }
 #endif
-    return last_slash ? last_slash + 1 : path;
+    return last_slash != NULL ? last_slash + 1 : path;
 }
 
 /**

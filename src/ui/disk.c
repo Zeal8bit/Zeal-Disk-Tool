@@ -57,7 +57,7 @@ static const char* const sizes[] = {
 
 const char* const* disk_get_partition_size_list(int* count)
 {
-    if (count) {
+    if (count != NULL) {
         *count = (int) DIM(s_valid_sizes);
     }
     return sizes;
@@ -75,7 +75,7 @@ disk_list_state_t* disk_get_state(void)
 
 void disk_sync(disk_info_t* disk)
 {
-    if (!disk || !disk->handle) {
+    if (disk == NULL || disk->handle == NULL) {
         return;
     }
     const zfs_info* info = zfs_get_info(disk->handle);
@@ -109,10 +109,10 @@ void disk_sync(disk_info_t* disk)
     disk->revision = ++next_revision;
 }
 
-static void report(disk_info_t* d, zfs_status s, const char* success)
+static void report(disk_info_t* disk, zfs_status status, const char* success)
 {
-    disk_sync(d);
-    ui_statusbar_print(s ? error.message : success);
+    disk_sync(disk);
+    ui_statusbar_print(status != ZFS_OK ? error.message : success);
 }
 
 disk_err_t disks_refresh(void)
@@ -140,14 +140,14 @@ disk_err_t disks_refresh(void)
     s_state.selected_partition = -1;
     zfs_info* found = calloc(MAX_DISKS, sizeof(*found));
     size_t count = 0;
-    if (!found) {
+    if (found == NULL) {
         return ERR_INVALID;
     }
     /* Refresh the disk list */
     zfs_status err = zfs_discover(found, MAX_DISKS - backup_count, &count, &error);
-    for (size_t i = 0; !err && i < count; ++i) {
+    for (size_t i = 0; err == ZFS_OK && i < count; ++i) {
         disk_info_t* disk = &s_state.disks[s_state.disk_count];
-        if (!zfs_open(found[i].path, false, &disk->handle, &error)) {
+        if (zfs_open(found[i].path, false, &disk->handle, &error) == ZFS_OK) {
             disk_sync(disk);
             ++s_state.disk_count;
         }
@@ -158,11 +158,11 @@ disk_err_t disks_refresh(void)
         s_state.disks[s_state.disk_count++] = backup_images[i];
     }
     /* Check for a default disk */
-    if (s_state.disk_count) {
+    if (s_state.disk_count != 0) {
         s_state.selected_disk = 0;
     }
-    ui_statusbar_print(err ? error.message : "Disk list refreshed");
-    return err ? ERR_INVALID : ERR_SUCCESS;
+    ui_statusbar_print(err != ZFS_OK ? error.message : "Disk list refreshed");
+    return err != ZFS_OK ? ERR_INVALID : ERR_SUCCESS;
 }
 
 void disks_close(void)
@@ -176,66 +176,71 @@ void disks_close(void)
 
 int disk_create_mbr(disk_info_t* disk)
 {
-    zfs_status ret = zfs_mbr_create(disk ? disk->handle : NULL, &error);
+    zfs_status ret = zfs_mbr_create(disk != NULL ? disk->handle : NULL, &error);
     report(disk, ret, "MBR creation staged");
-    return !ret;
+    return ret == ZFS_OK;
 }
 
 void disk_allocate_partition(disk_info_t* disk, uint32_t lba, uint32_t sectors_count)
 {
     (void) lba;
-    uint32_t alignment = disk && disk->allocation_alignment ? disk->allocation_alignment : 512;
+    uint32_t alignment = disk != NULL && disk->allocation_alignment != 0 ? disk->allocation_alignment : 512;
     int index;
-    zfs_status s =
-        zfs_partition_create(disk ? disk->handle : NULL, (uint64_t) sectors_count * 512, alignment, &index, &error);
-    report(disk, s, "Partition creation staged");
+    zfs_status status = zfs_partition_create(disk != NULL ? disk->handle : NULL,
+                                             (uint64_t) sectors_count * 512,
+                                             alignment,
+                                             &index,
+                                             &error);
+    report(disk, status, "Partition creation staged");
 }
 
 const char* disk_format_partition(disk_info_t* disk, int partition)
 {
-    zfs_status s = zfs_partition_format(disk ? disk->handle : NULL, partition, &error);
-    report(disk, s, "Partition formatting staged");
-    return s ? error.message : NULL;
+    zfs_status status = zfs_partition_format(disk != NULL ? disk->handle : NULL, partition, &error);
+    report(disk, status, "Partition formatting staged");
+    return status != ZFS_OK ? error.message : NULL;
 }
 
 void disk_delete_partition(disk_info_t* disk, int partition)
 {
-    report(disk, zfs_partition_delete(disk ? disk->handle : NULL, partition, &error), "Partition deletion staged");
+    report(disk,
+           zfs_partition_delete(disk != NULL ? disk->handle : NULL, partition, &error),
+           "Partition deletion staged");
 }
 
 void disk_revert_changes(disk_info_t* disk)
 {
-    if (disk && zfs_get_info(disk->handle)->new_image) {
+    if (disk != NULL && zfs_get_info(disk->handle)->new_image) {
         int index = (int) (disk - s_state.disks);
         zfs_close(disk->handle);
         memmove(disk, disk + 1, (size_t) (s_state.disk_count - index - 1) * sizeof(*disk));
         --s_state.disk_count;
         memset(&s_state.disks[s_state.disk_count], 0, sizeof(*disk));
-        s_state.selected_disk = s_state.disk_count ? 0 : -1;
+        s_state.selected_disk = s_state.disk_count != 0 ? 0 : -1;
         s_state.selected_partition = -1;
         ui_statusbar_print("New image discarded");
         return;
     }
     /* Cancel all the changes made to the disk */
-    report(disk, zfs_discard(disk ? disk->handle : NULL, &error), "Changes discarded");
+    report(disk, zfs_discard(disk != NULL ? disk->handle : NULL, &error), "Changes discarded");
 }
 
 const char* disk_write_changes(disk_info_t* disk)
 {
-    zfs_status s = zfs_apply(disk ? disk->handle : NULL, &error);
-    report(disk, s, "Changes applied");
-    return s ? error.message : NULL;
+    zfs_status status = zfs_apply(disk != NULL ? disk->handle : NULL, &error);
+    report(disk, status, "Changes applied");
+    return status != ZFS_OK ? error.message : NULL;
 }
 
 uint64_t disk_max_partition_size(disk_info_t* disk, uint32_t align, uint64_t* largest_free_addr)
 {
     uint64_t free_bytes = 0;
     uint64_t aligned_addr = 0;
-    if (disk) {
+    if (disk != NULL) {
         disk->allocation_alignment = align;
         zfs_partition_space(disk->handle, align, &aligned_addr, &free_bytes, &error);
     }
-    if (largest_free_addr) {
+    if (largest_free_addr != NULL) {
         *largest_free_addr = aligned_addr;
     }
     return free_bytes;
@@ -245,7 +250,7 @@ int disk_open_image_file_path(disk_list_state_t* state, const char* file_path)
 {
     /* Check if the image is already opened */
     for (int i = 0; i < state->disk_count; ++i) {
-        if (!strcmp(state->disks[i].path, file_path)) {
+        if (strcmp(state->disks[i].path, file_path) == 0) {
             return i;
         }
     }
@@ -255,7 +260,7 @@ int disk_open_image_file_path(disk_list_state_t* state, const char* file_path)
     }
     disk_info_t* disk = &state->disks[state->disk_count];
     memset(disk, 0, sizeof(*disk));
-    if (zfs_open(file_path, true, &disk->handle, &error)) {
+    if (zfs_open(file_path, true, &disk->handle, &error) != ZFS_OK) {
         ui_statusbar_print(error.message);
         return -1;
     }
@@ -267,7 +272,7 @@ int disk_open_image_file(disk_list_state_t* state)
 {
     const char* filter_patterns[] = {"*.img"};
     const char* file_path = tinyfd_openFileDialog("Open disk image", "", 1, filter_patterns, "Disk images", 0);
-    return file_path ? disk_open_image_file_path(state, file_path) : -1;
+    return file_path != NULL ? disk_open_image_file_path(state, file_path) : -1;
 }
 
 int disk_create_image(disk_list_state_t* state, const char* path, uint64_t size, bool init_mbr)
@@ -278,7 +283,7 @@ int disk_create_image(disk_list_state_t* state, const char* path, uint64_t size,
     }
     disk_info_t* disk = &state->disks[state->disk_count];
     memset(disk, 0, sizeof(*disk));
-    if (zfs_image_create(path, size, init_mbr, &disk->handle, &error)) {
+    if (zfs_image_create(path, size, init_mbr, &disk->handle, &error) != ZFS_OK) {
         ui_statusbar_print(error.message);
         return -1;
     }

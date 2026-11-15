@@ -24,7 +24,7 @@ int cli_confirm(const char* message, bool allow_discard)
     fprintf(stderr, "%s %s ", message, allow_discard ? "[a]pply/[d]iscard/[c]ancel:" : "[y/N]:");
     fflush(stderr);
     char line[64];
-    if (!fgets(line, sizeof(line), stdin)) {
+    if (fgets(line, sizeof(line), stdin) == NULL) {
         return 0;
     }
     if (allow_discard) {
@@ -33,28 +33,28 @@ int cli_confirm(const char* message, bool allow_discard)
     return line[0] == 'y' || line[0] == 'Y' ? 1 : 0;
 }
 
-int cli_leave_disk(cli_session* s, const cli_options* o)
+int cli_leave_disk(cli_session* session, const cli_options* opt)
 {
-    if (!s->disk) {
+    if (session->disk == NULL) {
         return 0;
     }
-    const zfs_info* info = zfs_get_info(s->disk);
+    const zfs_info* info = zfs_get_info(session->disk);
     if (info->pending) {
         char message[ZFS_PATH_MAX + 80];
         snprintf(message, sizeof(message), "Pending changes on %s.", info->path);
         int answer = cli_confirm(message, true);
-        if (!answer) {
-            return cli_failure(o, 3, "confirmation", "Apply or discard pending changes before leaving");
+        if (answer == 0) {
+            return cli_failure(opt, 3, "confirmation", "Apply or discard pending changes before leaving");
         }
         if (answer == 1) {
-            zfs_error e;
-            if (zfs_apply(s->disk, &e)) {
-                cli_recovery_notice(s->disk);
-                return cli_api_failure(o, &e);
+            zfs_error error;
+            if (zfs_apply(session->disk, &error) != ZFS_OK) {
+                cli_recovery_notice(session->disk);
+                return cli_api_failure(opt, &error);
             }
         }
     }
-    zfs_close(s->disk);
-    s->disk = NULL;
+    zfs_close(session->disk);
+    session->disk = NULL;
     return 0;
 }

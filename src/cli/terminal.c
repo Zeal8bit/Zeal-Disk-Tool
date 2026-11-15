@@ -39,15 +39,16 @@ static bool editing_begin(void)
 {
     input_handle = GetStdHandle(STD_INPUT_HANDLE);
     output_handle = GetStdHandle(STD_ERROR_HANDLE);
-    if (!GetConsoleMode(input_handle, &input_mode) || !GetConsoleMode(output_handle, &output_mode)) {
+    if (GetConsoleMode(input_handle, &input_mode) == 0 || GetConsoleMode(output_handle, &output_mode) == 0) {
         return false;
     }
     output_codepage = GetConsoleOutputCP();
-    if (!SetConsoleMode(output_handle, output_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING)) {
+    if (SetConsoleMode(output_handle, output_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) == 0) {
         return false;
     }
-    if (SetConsoleMode(input_handle, input_mode & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT))) {
-        if (SetConsoleOutputCP(CP_UTF8)) {
+    if (SetConsoleMode(input_handle, input_mode & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT)) !=
+        0) {
+        if (SetConsoleOutputCP(CP_UTF8) != 0) {
             return true;
         }
         SetConsoleMode(input_handle, input_mode);
@@ -67,7 +68,7 @@ static void editing_end(void)
 static int columns(void)
 {
     CONSOLE_SCREEN_BUFFER_INFO info;
-    return GetConsoleScreenBufferInfo(output_handle, &info) ? info.srWindow.Right - info.srWindow.Left + 1 : 80;
+    return GetConsoleScreenBufferInfo(output_handle, &info) != 0 ? info.srWindow.Right - info.srWindow.Left + 1 : 80;
 }
 
 static int read_key(void)
@@ -111,7 +112,7 @@ static int read_key(void)
     count =
         WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text, length, (char*) encoded, sizeof(encoded), NULL, NULL);
     at = 0;
-    return count ? encoded[at++] : KEY_IGNORE;
+    return count != 0 ? encoded[at++] : KEY_IGNORE;
 }
 #else
 static struct termios saved_mode;
@@ -136,7 +137,7 @@ static void interrupted(int number)
             sigprocmask(SIG_SETMASK, &blocked, NULL);
             /* Execution resumes here after a suspended process continues. */
             sigaction(number, &handler, NULL);
-            if (active) {
+            if (active != 0) {
                 tcsetattr(STDIN_FILENO, TCSANOW, &edit_mode);
             }
             break;
@@ -146,7 +147,7 @@ static void interrupted(int number)
 
 static bool editing_begin(void)
 {
-    if (!isatty(STDERR_FILENO) || tcgetattr(STDIN_FILENO, &saved_mode)) {
+    if (isatty(STDERR_FILENO) == 0 || tcgetattr(STDIN_FILENO, &saved_mode) != 0) {
         return false;
     }
     edit_mode = saved_mode;
@@ -159,15 +160,15 @@ static bool editing_begin(void)
     sigemptyset(&handler.sa_mask);
     size_t i;
     for (i = 0; i < 5; ++i) {
-        if (sigaction(signals[i], &handler, &saved_signals[i])) {
+        if (sigaction(signals[i], &handler, &saved_signals[i]) != 0) {
             break;
         }
     }
-    if (i == 5 && !tcsetattr(STDIN_FILENO, TCSANOW, &edit_mode)) {
+    if (i == 5 && tcsetattr(STDIN_FILENO, TCSANOW, &edit_mode) == 0) {
         active = 1;
         return true;
     }
-    while (i) {
+    while (i != 0) {
         --i, sigaction(signals[i], &saved_signals[i], NULL);
     }
     return false;
@@ -185,7 +186,7 @@ static void editing_end(void)
 static int columns(void)
 {
     struct winsize size;
-    return !ioctl(STDERR_FILENO, TIOCGWINSZ, &size) && size.ws_col ? size.ws_col : 80;
+    return ioctl(STDERR_FILENO, TIOCGWINSZ, &size) == 0 && size.ws_col != 0 ? size.ws_col : 80;
 }
 
 static int read_byte(void)
@@ -224,25 +225,25 @@ static int read_key(void)
         }
     }
     sequence[n] = 0;
-    if (!strcmp(sequence, "A")) {
+    if (strcmp(sequence, "A") == 0) {
         return KEY_UP;
     }
-    if (!strcmp(sequence, "B")) {
+    if (strcmp(sequence, "B") == 0) {
         return KEY_DOWN;
     }
-    if (!strcmp(sequence, "C")) {
+    if (strcmp(sequence, "C") == 0) {
         return KEY_RIGHT;
     }
-    if (!strcmp(sequence, "D")) {
+    if (strcmp(sequence, "D") == 0) {
         return KEY_LEFT;
     }
-    if (!strcmp(sequence, "H") || !strcmp(sequence, "1~")) {
+    if (strcmp(sequence, "H") == 0 || strcmp(sequence, "1~") == 0) {
         return KEY_HOME;
     }
-    if (!strcmp(sequence, "F") || !strcmp(sequence, "4~")) {
+    if (strcmp(sequence, "F") == 0 || strcmp(sequence, "4~") == 0) {
         return KEY_END;
     }
-    if (!strcmp(sequence, "3~")) {
+    if (strcmp(sequence, "3~") == 0) {
         return KEY_DELETE;
     }
     return KEY_IGNORE;
@@ -250,10 +251,10 @@ static int read_key(void)
 #endif
 static size_t previous(const char* line, size_t at)
 {
-    if (at) {
+    if (at != 0) {
         --at;
     }
-    while (at && ((unsigned char) line[at] & 0xc0) == 0x80) {
+    while (at != 0 && ((unsigned char) line[at] & 0xc0) == 0x80) {
         --at;
     }
     return at;
@@ -261,10 +262,10 @@ static size_t previous(const char* line, size_t at)
 
 static size_t next(const char* line, size_t at)
 {
-    if (line[at]) {
+    if (line[at] != 0) {
         ++at;
     }
-    while (line[at] && ((unsigned char) line[at] & 0xc0) == 0x80) {
+    while (line[at] != 0 && ((unsigned char) line[at] & 0xc0) == 0x80) {
         ++at;
     }
     return at;
@@ -285,7 +286,7 @@ static void redraw(const char* line, size_t cursor)
     }
     size_t start = cursor;
     int used = 0;
-    while (start) {
+    while (start != 0) {
         size_t before = previous(line, start);
         int w = width(line, before);
         if (used + w > room) {
@@ -297,7 +298,7 @@ static void redraw(const char* line, size_t cursor)
     fputs("\r\033[2Kzdt> ", stderr);
     fwrite(line + start, 1, cursor - start, stderr);
     fputs("\0337", stderr);
-    for (size_t end = cursor; line[end];) {
+    for (size_t end = cursor; line[end] != 0;) {
         int w = width(line, end);
         if (used + w > room) {
             break;
@@ -311,25 +312,25 @@ static void redraw(const char* line, size_t cursor)
     fflush(stderr);
 }
 
-void cli_history_add(cli_history* h, const char* line)
+void cli_history_add(cli_history* history, const char* line)
 {
     const char* p = line;
-    while (isspace((unsigned char) *p)) {
+    while (isspace((unsigned char) *p) != 0) {
         ++p;
     }
-    if (!*p) {
+    if (*p == 0) {
         return;
     }
     size_t length = strcspn(line, "\r\n");
-    memcpy(h->entries[h->next], line, length);
-    h->entries[h->next][length] = 0;
-    h->next = (h->next + 1) % CLI_HISTORY_LIMIT;
-    if (h->count < CLI_HISTORY_LIMIT) {
-        ++h->count;
+    memcpy(history->entries[history->next], line, length);
+    history->entries[history->next][length] = 0;
+    history->next = (history->next + 1) % CLI_HISTORY_LIMIT;
+    if (history->count < CLI_HISTORY_LIMIT) {
+        ++history->count;
     }
 }
 
-cli_input cli_readline(cli_history* h, char line[CLI_LINE_CAPACITY], bool terminal)
+cli_input cli_readline(cli_history* history, char line[CLI_LINE_CAPACITY], bool terminal)
 {
     bool edit = terminal && editing_begin();
     if (!edit) {
@@ -337,10 +338,10 @@ cli_input cli_readline(cli_history* h, char line[CLI_LINE_CAPACITY], bool termin
             fputs("zdt> ", stderr);
             fflush(stderr);
         }
-        if (!fgets(line, CLI_LINE_CAPACITY, stdin)) {
-            return ferror(stdin) ? CLI_INPUT_ERROR : CLI_INPUT_EOF;
+        if (fgets(line, CLI_LINE_CAPACITY, stdin) == NULL) {
+            return ferror(stdin) != 0 ? CLI_INPUT_ERROR : CLI_INPUT_EOF;
         }
-        if (!strchr(line, '\n') && !feof(stdin)) {
+        if (strchr(line, '\n') == NULL && feof(stdin) == 0) {
             int c;
             while ((c = getchar()) != '\n' && c != EOF) {
             }
@@ -370,22 +371,24 @@ cli_input cli_readline(cli_history* h, char line[CLI_LINE_CAPACITY], bool termin
             line[0] = 0;
             break;
         }
-        if (key == 4 && !length) {
+        if (key == 4 && length == 0) {
             result = CLI_INPUT_EOF;
             break;
         }
         if (key == KEY_UP || key == KEY_DOWN) {
-            if (key == KEY_UP && distance < h->count) {
-                if (!distance) {
+            if (key == KEY_UP && distance < history->count) {
+                if (distance == 0) {
                     strcpy(draft, line);
                 }
                 ++distance;
-            } else if (key == KEY_DOWN && distance) {
+            } else if (key == KEY_DOWN && distance != 0) {
                 --distance;
             } else {
                 continue;
             }
-            strcpy(line, distance ? h->entries[(h->next + CLI_HISTORY_LIMIT - distance) % CLI_HISTORY_LIMIT] : draft);
+            strcpy(line,
+                   distance != 0 ? history->entries[(history->next + CLI_HISTORY_LIMIT - distance) % CLI_HISTORY_LIMIT]
+                                 : draft);
             cursor = strlen(line);
             length = cursor;
             overflow = false;
@@ -402,7 +405,7 @@ cli_input cli_readline(cli_history* h, char line[CLI_LINE_CAPACITY], bool termin
             length = 0;
             line[0] = 0;
             overflow = false;
-        } else if ((key == 127 || key == 8) && cursor) {
+        } else if ((key == 127 || key == 8) && cursor != 0) {
             size_t before = previous(line, cursor);
             memmove(line + before, line + cursor, length - cursor + 1);
             length -= cursor - before;

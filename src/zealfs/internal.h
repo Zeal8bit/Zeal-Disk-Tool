@@ -13,16 +13,16 @@ typedef HANDLE zfs_native;
 typedef int zfs_native;
 #define ZFS_NATIVE_INVALID (-1)
 #endif
-zfs_status zfs_error_set(zfs_error* e, zfs_status code, const char* format, ...);
-zfs_status zfs_native_open(const char* path, bool write, zfs_native* fd, uint64_t* size, zfs_error* e);
-zfs_status zfs_native_read(zfs_native fd, uint64_t offset, void* data, size_t size, zfs_error* e);
-zfs_status zfs_native_write(zfs_native fd, uint64_t offset, const void* data, size_t size, zfs_error* e);
-zfs_status zfs_native_sync(zfs_native fd, zfs_error* e);
+zfs_status zfs_error_set(zfs_error* error, zfs_status code, const char* format, ...);
+zfs_status zfs_native_open(const char* path, bool write, zfs_native* fd, uint64_t* size, zfs_error* error);
+zfs_status zfs_native_read(zfs_native fd, uint64_t offset, void* data, size_t size, zfs_error* error);
+zfs_status zfs_native_write(zfs_native fd, uint64_t offset, const void* data, size_t size, zfs_error* error);
+zfs_status zfs_native_sync(zfs_native fd, zfs_error* error);
 void zfs_native_close(zfs_native fd);
 /* Refuse mounted/claimed devices and hold exclusive access. Images use native
  * file locks. Device handles may be replaced with a stable exclusive handle. */
-zfs_status zfs_native_guard(zfs_native* fd, const char* path, bool image, bool writing, zfs_error* e);
-bool zfs_native_same(zfs_native a, zfs_native b);
+zfs_status zfs_native_guard(zfs_native* fd, const char* path, bool image, bool writing, zfs_error* error);
+bool zfs_native_same(zfs_native first_device, zfs_native second_device);
 /* Host helpers use binary files and 64-bit offsets on every architecture. */
 bool zfs_host_resolve(const char* path, char* out, size_t capacity);
 bool zfs_host_exists(const char* path);

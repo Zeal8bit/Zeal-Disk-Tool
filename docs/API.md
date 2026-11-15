@@ -7,16 +7,25 @@
 ```c
 #include <zealfs.h>
 
-int create_image(void) {
-    zfs_disk *disk = NULL;
+int create_image(void)
+{
+    zfs_disk* disk = NULL;
     zfs_error error = {0};
     int partition;
     zfs_status status = zfs_image_create("disk.img", 16 * 1024 * 1024, true, &disk, &error);
-    if (!status) status = zfs_partition_create(disk, 8 * 1024 * 1024, 1024 * 1024, &partition, &error);
-    if (!status) status = zfs_mkdir(disk, partition, "/programs", &error);
-    if (!status) status = zfs_file_write(disk, partition, "/programs/hello", "hello", 5, &error);
+    if (status == ZFS_OK) {
+        status = zfs_partition_create(disk, 8 * 1024 * 1024, 1024 * 1024, &partition, &error);
+    }
+    if (status == ZFS_OK) {
+        status = zfs_mkdir(disk, partition, "/programs", &error);
+    }
+    if (status == ZFS_OK) {
+        status = zfs_file_write(disk, partition, "/programs/hello", "hello", 5, &error);
+    }
     /* Nothing has appeared at disk.img yet. Caller decides whether to commit. */
-    if (!status) status = zfs_apply(disk, &error);
+    if (status == ZFS_OK) {
+        status = zfs_apply(disk, &error);
+    }
     zfs_close(disk);
     return status == ZFS_OK ? 0 : 1;
 }
