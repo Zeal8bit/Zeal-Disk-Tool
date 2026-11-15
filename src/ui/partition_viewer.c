@@ -252,6 +252,10 @@ static void extract_selected_file(void)
     char path[MAX_PATH_LENGTH];
     zfs_error error;
     zfs_status ret;
+    zfs_export_request request;
+    const zfs_callbacks callbacks = {
+        .progress = gui_progress,
+    };
 
     if (m_part_ctx.entries_count <= 0) {
         return;
@@ -273,9 +277,14 @@ static void extract_selected_file(void)
         return;
     }
     disk_init_progress_bar();
-    zfs_set_callbacks(m_part_ctx.disk->handle, (zfs_callbacks){.progress = gui_progress});
-    ret = zfs_export(m_part_ctx.disk->handle, current_partition(), path, destination, true, &error);
-    zfs_set_callbacks(m_part_ctx.disk->handle, (zfs_callbacks){0});
+    request = (zfs_export_request){
+        .partition = current_partition(),
+        .path = path,
+        .host_path = destination,
+        .overwrite = true,
+        .callbacks = &callbacks,
+    };
+    ret = zfs_export_files(m_part_ctx.disk->handle, &request, &error);
     disk_destroy_progress_bar();
     ui_statusbar_print(ret ? error.message : "File exported");
 }
@@ -286,6 +295,10 @@ static int import_file(const char* file_path)
     char path[MAX_PATH_LENGTH];
     zfs_error error;
     zfs_status ret;
+    zfs_import_request request;
+    const zfs_callbacks callbacks = {
+        .progress = gui_progress,
+    };
 
     /* Check if the file name complies with the FS restrictions */
     filename = disk_get_basename(file_path);
@@ -301,9 +314,14 @@ static int import_file(const char* file_path)
         return 0;
     }
     disk_init_progress_bar();
-    zfs_set_callbacks(m_part_ctx.disk->handle, (zfs_callbacks){.progress = gui_progress});
-    ret = zfs_import(m_part_ctx.disk->handle, current_partition(), file_path, path, &error);
-    zfs_set_callbacks(m_part_ctx.disk->handle, (zfs_callbacks){0});
+    request = (zfs_import_request){
+        .partition = current_partition(),
+        .host_paths = &file_path,
+        .count = 1,
+        .path = path,
+        .callbacks = &callbacks,
+    };
+    ret = zfs_import_files(m_part_ctx.disk->handle, &request, &error);
     disk_destroy_progress_bar();
     mutation_result(ret, &error, "File import staged");
     return ret == ZFS_OK;

@@ -185,8 +185,15 @@ static zfs_status walk(zfs_merge_plan* plan, zfs_disk* source, int source_partit
             status = walk(plan, source, source_partition, target_partition, child, true, true, error);
         } else if (source_entry != NULL && target_entry != NULL) {
             bool equal = false;
-            status =
-                zfs_core_files_equal(source, source_partition, plan->target, target_partition, child, &equal, error);
+            const zfs_partition_ref source_ref = {
+                .disk = source,
+                .partition = source_partition,
+            };
+            const zfs_partition_ref target_ref = {
+                .disk = plan->target,
+                .partition = target_partition,
+            };
+            status = zfs_core_files_equal(source_ref, target_ref, child, &equal, error);
             if (status == ZFS_OK && equal) {
                 ++report->files_unchanged;
             } else if (status == ZFS_OK) {

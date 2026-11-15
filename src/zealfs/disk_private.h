@@ -44,6 +44,11 @@ struct zfs_disk {
     uint64_t recovery_size;
 };
 
+typedef struct {
+    zfs_disk* disk;
+    int partition;
+} zfs_partition_ref;
+
 zfs_status zfs_core_guard(zfs_disk* disk, bool writing, zfs_error* error);
 bool zfs_core_same_disk(zfs_disk* first_disk, zfs_disk* second_disk);
 bool zfs_core_unchanged(zfs_disk* disk);
@@ -55,8 +60,9 @@ zfs_status zfs_core_copy_file(zfs_disk* source, int source_partition, zfs_disk* 
                               const char* path, zfs_error* error);
 zfs_status zfs_core_copy_metadata(zfs_disk* source, int source_partition, zfs_disk* target, int target_partition,
                                   const char* path, zfs_error* error);
-zfs_status zfs_core_files_equal(zfs_disk* source, int source_partition, zfs_disk* target, int target_partition,
-                                const char* path, bool* equal, zfs_error* error);
+/* A NULL target.disk validates the source file without comparing another file. */
+zfs_status zfs_core_files_equal(zfs_partition_ref source, zfs_partition_ref target, const char* path, bool* equal,
+                                zfs_error* error);
 zfs_status zfs_core_check_file(zfs_disk* disk, int partition, const char* path, zfs_error* error);
 zfs_status zfs_core_path_directory(zfs_disk* disk, int partition, const char* path, bool* directory, zfs_error* error);
 zfs_status zfs_core_export_destination(zfs_disk* disk, const char* host, zfs_error* error);

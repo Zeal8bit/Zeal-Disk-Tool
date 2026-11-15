@@ -40,6 +40,38 @@ int create_image(void)
 - All API partition indices are zero-based. The CLI translates user-visible partition numbers 1–4; the GUI labels slots 0–3. API paths use `/` within the filesystem, independently of the host OS; dot components and trailing slashes are rejected except for root `/`. The CLI accepts optional leading/trailing slashes and normalizes its filesystem arguments before calling the API.
 - Each handle is single-threaded. Different handles can be used independently; do not concurrently apply to the same target. Progress/log callbacks run synchronously and must not reenter that handle.
 
+## Transfer requests
+
+`zfs_import_files` and `zfs_export_files` take a disk handle, a request structure,
+and a separate error output. Both frontends use these calls. The older
+`zfs_import`, `zfs_import_many`, `zfs_export` and `zfs_export_validate` functions
+remain available as convenience wrappers.
+
+Requests borrow their paths, source arrays, callback bundles and callback user
+data for the synchronous call only. A NULL `callbacks` pointer uses the session
+callbacks. A non-NULL pointer replaces the entire bundle for that transfer;
+a pointer to a zeroed bundle temporarily silences callbacks. The original
+session callbacks are restored on success and failure. Callbacks must not
+reenter the same handle.
+
+```c
+const char* sources[] = {"game.bin", "assets.zar"};
+const zfs_import_request request = {
+    .partition = partition,
+    .host_paths = sources,
+    .count = sizeof(sources) / sizeof(sources[0]),
+    .path = "/games",
+    .overwrite = true,
+    .callbacks = NULL,
+};
+zfs_error error = {0};
+zfs_status status = zfs_import_files(disk, &request, &error);
+```
+
+For export, set `zfs_export_request.path` to the ZealFS source and `host_path`
+to the host destination. Set `validate_only=true` for preflight without host
+writes. Import and export retain the staging and overwrite rules below.
+
 ## Staging contract
 
 All disk-changing API operations stage sectors; only `zfs_apply` writes the target. Browsing, reads, usage and export see the current overlay, including newly formatted partitions. Host export is immediate and cannot replace the active image or an alias of it. `zfs_export` copies a file to its host filename or recursively copies a directory’s contents into a host directory, creating missing directories. `zfs_export_validate` performs source reads and destination conflict checks without host writes. A preflight conflict prevents all export writes; existing files require `overwrite=true`. Unrelated destination entries remain. File/directory mismatches and destination links are rejected. Each file uses temporary-output publication, but an I/O failure can leave completed files/directories from a tree export. Host imports, byte-based file creation, MBR changes, partition changes, mkdir and removal are operation-atomic: on failure the previous staged state is restored.

@@ -50,6 +50,134 @@ static void empty(zfs_disk* d, int part)
     zfs_entries_free(entries);
 }
 
+typedef struct {
+    unsigned progress;
+    unsigned logs;
+} callback_counts;
+
+static void count_progress(void* user, uint64_t completed, uint64_t total)
+{
+    callback_counts* counts = user;
+    REQUIRE(completed <= total);
+    ++counts->progress;
+}
+
+static void count_log(void* user, const char* message)
+{
+    callback_counts* counts = user;
+    REQUIRE(message != NULL);
+    ++counts->logs;
+}
+
+static void transfer_requests(const char* directory, const char* large_source)
+{
+    char image[600];
+    char source[600];
+    char destination[600];
+    zfs_disk* disk = NULL;
+    callback_counts session = {0};
+    callback_counts scoped = {0};
+    const zfs_callbacks callbacks = {
+        .progress = count_progress,
+        .log = count_log,
+        .user = &scoped,
+    };
+    const zfs_callbacks silent = {0};
+    uint64_t free_before;
+    uint64_t free_after;
+    uint64_t total;
+    unsigned saved;
+    unsigned char contents[4];
+    size_t count;
+    FILE* file;
+
+    snprintf(image, sizeof(image), "%s/callback.img", directory);
+    snprintf(source, sizeof(source), "%s/small.bin", directory);
+    snprintf(destination, sizeof(destination), "%s/callback.bin", directory);
+    file = fopen(source, "wb");
+    REQUIRE(file != NULL);
+    REQUIRE(fwrite("test", 1, 4, file) == 4);
+    REQUIRE(fclose(file) == 0);
+    OK(zfs_image_create(image, 32768, false, &disk, &error));
+    OK(zfs_partition_create(disk, 0, 512, NULL, &error));
+    zfs_set_callbacks(disk,
+                      (zfs_callbacks){
+                          .progress = count_progress,
+                          .log = count_log,
+                          .user = &session,
+                      });
+    const char* host = source;
+    zfs_import_request import = {
+        .partition = 0,
+        .host_paths = &host,
+        .count = 1,
+        .path = "/small.bin",
+        .callbacks = &callbacks,
+    };
+    zfs_export_request export = {
+        .partition = 0,
+        .path = "/small.bin",
+        .host_path = destination,
+        .callbacks = &callbacks,
+    };
+    OK(zfs_import_files(disk, &import, &error));
+    REQUIRE(scoped.progress > 0 && session.progress == 0);
+    OK(zfs_export_files(disk, &export, &error));
+    REQUIRE(hash(source) == hash(destination));
+    REQUIRE(session.progress == 0);
+    REQUIRE(zfs_import_files(disk, &import, &error) == ZFS_EXISTS);
+    REQUIRE(zfs_export_files(disk, &export, &error) == ZFS_EXISTS);
+    saved = scoped.progress;
+    OK(zfs_export(disk, 0, "/small.bin", destination, true, &error));
+    REQUIRE(session.progress > 0 && scoped.progress == saved);
+
+    /* Validation must not publish, even with scoped callbacks and overwrite. */
+    REQUIRE(remove(destination) == 0);
+    export.validate_only = true;
+    OK(zfs_export_files(disk, &export, &error));
+    REQUIRE(access(destination, 0) != 0);
+    export.path = "/missing";
+    REQUIRE(zfs_export_files(disk, &export, &error) == ZFS_NOT_FOUND);
+    export.path = "/small.bin";
+    export.validate_only = false;
+    export.callbacks = &silent;
+    saved = session.progress;
+    OK(zfs_export_files(disk, &export, &error));
+    REQUIRE(session.progress == saved);
+    export.callbacks = NULL;
+    export.overwrite = true;
+    OK(zfs_export_files(disk, &export, &error));
+    REQUIRE(session.progress > saved);
+
+    /* Failure after writes restores prior staged data and the original callbacks. */
+    OK(zfs_usage(disk, 0, &free_before, &total, &error));
+    host = large_source;
+    import.path = "/too-big";
+    REQUIRE(zfs_import_files(disk, &import, &error) == ZFS_NO_SPACE);
+    OK(zfs_usage(disk, 0, &free_after, &total, &error));
+    REQUIRE(free_before == free_after);
+    REQUIRE(zfs_get_info(disk)->pending);
+    OK(zfs_file_read(disk, 0, "/small.bin", 0, contents, sizeof(contents), &count, &error));
+    REQUIRE(count == 4 && memcmp(contents, "test", 4) == 0);
+    REQUIRE(zfs_file_read(disk, 0, "/too-big", 0, contents, sizeof(contents), &count, &error) == ZFS_NOT_FOUND);
+    import.path = NULL;
+    REQUIRE(zfs_import_files(disk, &import, &error) == ZFS_INVALID);
+    REQUIRE(zfs_import_files(disk, NULL, &error) == ZFS_INVALID);
+    REQUIRE(zfs_export_files(disk, NULL, &error) == ZFS_INVALID);
+    import.path = "/null-disk";
+    REQUIRE(zfs_import_files(NULL, &import, &error) != ZFS_OK);
+    REQUIRE(zfs_export_files(NULL, &export, &error) != ZFS_OK);
+    saved = session.progress;
+    OK(zfs_export(disk, 0, "/small.bin", destination, true, &error));
+    REQUIRE(session.progress > saved);
+    OK(zfs_apply(disk, &error));
+    REQUIRE(session.logs == 1 && scoped.logs == 0);
+    zfs_close(disk);
+    REQUIRE(remove(image) == 0);
+    REQUIRE(remove(source) == 0);
+    REQUIRE(remove(destination) == 0);
+}
+
 int main(void)
 {
     char directory[512];
@@ -102,6 +230,7 @@ int main(void)
     REQUIRE(fwrite(payload, 1, sizeof(payload), f) == sizeof(payload));
     fclose(f);
     REQUIRE(hash(source) == hash(exported));
+    transfer_requests(directory, source);
     REQUIRE(zfs_file_write(d, 0, "/folder/test.bin", payload, 1, &error) == ZFS_EXISTS);
     REQUIRE(zfs_mkdir(d, 0, "/missing/child", &error) == ZFS_NOT_FOUND);
     REQUIRE(zfs_remove(d, 0, "/folder", true, &error) != ZFS_OK);

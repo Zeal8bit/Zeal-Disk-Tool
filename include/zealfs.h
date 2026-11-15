@@ -83,6 +83,27 @@ typedef struct {
     void* user;
 } zfs_callbacks;
 
+/* Requests borrow paths and callbacks for the synchronous call. NULL callbacks
+ * retain the session callbacks; non-NULL callbacks replace them for this call
+ * only. Session callbacks are restored on every success or failure path. */
+typedef struct {
+    int partition;
+    const char* const* host_paths;
+    size_t count;
+    const char* path;
+    bool overwrite;
+    const zfs_callbacks* callbacks;
+} zfs_import_request;
+
+typedef struct {
+    int partition;
+    const char* path;
+    const char* host_path;
+    bool overwrite;
+    bool validate_only;
+    const zfs_callbacks* callbacks;
+} zfs_export_request;
+
 /* All errors are caller-owned; NULL is allowed. Each handle is single-threaded.
  * Open/discover never writes. Close discards. Only apply writes the target.
  * Partition indices in this API are zero-based. Paths are absolute ZealFS paths.
@@ -111,6 +132,8 @@ zfs_status zfs_remove(zfs_disk* disk, int partition, const char* path, bool dire
  * preserves source basenames; patterns require a directory. zfs_import does not
  * overwrite. zfs_import_many can replace files when overwrite is true; directories
  * are never replaced. The entire batch is one atomic staged operation. */
+zfs_status zfs_import_files(zfs_disk* disk, const zfs_import_request* request, zfs_error* error);
+/* Convenience entry points retain their existing signatures and session callbacks. */
 zfs_status zfs_import(zfs_disk* disk, int partition, const char* host_path, const char* path, zfs_error* error);
 zfs_status zfs_import_many(zfs_disk* disk, int partition, const char* const* host_paths, size_t count, const char* path,
                            bool overwrite, zfs_error* error);
@@ -119,6 +142,7 @@ zfs_status zfs_import_many(zfs_disk* disk, int partition, const char* const* hos
  * only to the final component. Directories recursively export their contents into
  * host_path. Existing unrelated host entries are preserved. Each file publishes
  * atomically; an I/O failure may leave already-exported files/directories. */
+zfs_status zfs_export_files(zfs_disk* disk, const zfs_export_request* request, zfs_error* error);
 zfs_status zfs_export(zfs_disk* disk, int partition, const char* path, const char* host_path, bool overwrite,
                       zfs_error* error);
 /* Validate source contents and destination conflicts without host writes. */

@@ -190,20 +190,28 @@ static int command_export(cli_session* session, const cli_options* opt)
 {
     zfs_error error = {0};
     zfs_status status;
+    zfs_export_request request = {
+        .partition = opt->partition,
+        .path = opt->argv[1],
+        .host_path = opt->argv[2],
+        .overwrite = opt->dry_run,
+        .validate_only = opt->dry_run,
+    };
     if (opt->dry_run) {
-        status = zfs_export_validate(session->disk, opt->partition, opt->argv[1], opt->argv[2], true, &error);
+        status = zfs_export_files(session->disk, &request, &error);
         if (status != ZFS_OK) {
             return cli_api_failure(opt, &error);
         }
         cli_success(opt, "Export validated; destination unchanged");
         return 0;
     }
-    status = zfs_export(session->disk, opt->partition, opt->argv[1], opt->argv[2], false, &error);
+    status = zfs_export_files(session->disk, &request, &error);
     if (status == ZFS_EXISTS) {
         if (!opt->yes && cli_confirm("Overwrite export destination?", false) == 0) {
             return cli_failure(opt, 3, "confirmation", "Export overwrite requires confirmation or --yes");
         }
-        status = zfs_export(session->disk, opt->partition, opt->argv[1], opt->argv[2], true, &error);
+        request.overwrite = true;
+        status = zfs_export_files(session->disk, &request, &error);
     }
     if (status != ZFS_OK) {
         return cli_api_failure(opt, &error);
@@ -243,27 +251,23 @@ static int command_file_change(cli_session* session, const cli_options* opt)
         status = zfs_remove(session->disk, opt->partition, opt->argv[1], strcmp(opt->argv[0], "rmdir") == 0, &error);
     } else if (opt->argc >= 3 && strcmp(opt->argv[0], "import") == 0) {
         const char* sources[CLI_MAX_ARGS];
+        zfs_import_request request = {
+            .partition = opt->partition,
+            .host_paths = sources,
+            .count = (size_t) opt->argc - 2,
+            .path = opt->argv[opt->argc - 1],
+            .overwrite = opt->yes || opt->dry_run,
+        };
         for (int i = 1; i < opt->argc - 1; ++i) {
             sources[i - 1] = opt->argv[i];
         }
-        status = zfs_import_many(session->disk,
-                                 opt->partition,
-                                 sources,
-                                 (size_t) opt->argc - 2,
-                                 opt->argv[opt->argc - 1],
-                                 opt->yes || opt->dry_run,
-                                 &error);
+        status = zfs_import_files(session->disk, &request, &error);
         if (status == ZFS_EXISTS) {
             if (!opt->yes && cli_confirm("Overwrite existing import destination files?", false) == 0) {
                 return cli_failure(opt, 3, "confirmation", "Import overwrite requires confirmation or --yes");
             }
-            status = zfs_import_many(session->disk,
-                                     opt->partition,
-                                     sources,
-                                     (size_t) opt->argc - 2,
-                                     opt->argv[opt->argc - 1],
-                                     true,
-                                     &error);
+            request.overwrite = true;
+            status = zfs_import_files(session->disk, &request, &error);
         }
     } else {
         return cli_failure(opt, 2, "usage", "Unknown command or incorrect arguments; use help");

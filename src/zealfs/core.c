@@ -1398,31 +1398,31 @@ static zfs_status import_file(filesystem* fs, const char* host, const char* path
     return status;
 }
 
-zfs_status zfs_import_many(zfs_disk* disk, int part, const char* const* hosts, size_t count, const char* path,
-                           bool overwrite, zfs_error* error)
+static zfs_status import_many(zfs_disk* disk, const zfs_import_request* request, zfs_error* error)
 {
-    if (hosts == NULL || count == 0 || path == NULL || *path == 0 || strlen(path) >= ZFS_FS_PATH_MAX) {
+    if (request->host_paths == NULL || request->count == 0 || request->path == NULL || *request->path == 0 ||
+        strlen(request->path) >= ZFS_FS_PATH_MAX) {
         return zfs_error_set(error, ZFS_INVALID, "Import sources and a destination are required");
     }
     char destination[ZFS_FS_PATH_MAX];
-    strcpy(destination, path);
+    strcpy(destination, request->path);
     size_t length = strlen(destination);
-    bool require_directory = count > 1 || destination[length - 1] == '/';
+    bool require_directory = request->count > 1 || destination[length - 1] == '/';
     while (length > 1 && destination[length - 1] == '/') {
         destination[--length] = 0;
     }
     zfs_status status = path_check(destination, error);
     char** sources = NULL;
     size_t source_count = 0;
-    for (size_t i = 0; status == ZFS_OK && i < count; ++i) {
-        if (hosts[i] != NULL && strpbrk(hosts[i], "*?") != NULL) {
+    for (size_t i = 0; status == ZFS_OK && i < request->count; ++i) {
+        if (request->host_paths[i] != NULL && strpbrk(request->host_paths[i], "*?") != NULL) {
             require_directory = true;
         }
-        status = zfs_host_expand(hosts[i], &sources, &source_count, error);
+        status = zfs_host_expand(request->host_paths[i], &sources, &source_count, error);
     }
     bool directory = false;
     if (status == ZFS_OK) {
-        status = zfs_core_path_directory(disk, part, destination, &directory, error);
+        status = zfs_core_path_directory(disk, request->partition, destination, &directory, error);
         if (status == ZFS_NOT_FOUND && !require_directory) {
             status = ZFS_OK;
         } else if (status == ZFS_OK && require_directory && !directory) {
@@ -1431,7 +1431,7 @@ zfs_status zfs_import_many(zfs_disk* disk, int part, const char* const* hosts, s
     }
     filesystem* fs = NULL;
     if (status == ZFS_OK) {
-        status = fs_open(disk, part, &fs, error);
+        status = fs_open(disk, request->partition, &fs, error);
     }
     if (status == ZFS_OK) {
         qsort(sources, source_count, sizeof(*sources), compare_import_paths);
@@ -1454,7 +1454,7 @@ zfs_status zfs_import_many(zfs_disk* disk, int part, const char* const* hosts, s
                             : snprintf(target, sizeof(target), "%s", destination);
                 status = n < 0 || (size_t) n >= sizeof(target)
                              ? zfs_error_set(error, ZFS_INVALID, "Import destination path is too long")
-                             : import_file(fs, sources[i], target, overwrite, error);
+                             : import_file(fs, sources[i], target, request->overwrite, error);
             }
             status = finish(disk, status, error);
         }
@@ -1462,6 +1462,38 @@ zfs_status zfs_import_many(zfs_disk* disk, int part, const char* const* hosts, s
     free(fs);
     zfs_host_paths_free(sources, source_count);
     return status;
+}
+
+zfs_status zfs_import_files(zfs_disk* disk, const zfs_import_request* request, zfs_error* error)
+{
+    if (request == NULL) {
+        return zfs_error_set(error, ZFS_INVALID, "Import request is required");
+    }
+    zfs_callbacks previous = {0};
+    if (disk != NULL) {
+        previous = disk->callbacks;
+        if (request->callbacks != NULL) {
+            disk->callbacks = *request->callbacks;
+        }
+    }
+    zfs_status status = import_many(disk, request, error);
+    if (disk != NULL) {
+        disk->callbacks = previous;
+    }
+    return status;
+}
+
+zfs_status zfs_import_many(zfs_disk* disk, int part, const char* const* hosts, size_t count, const char* path,
+                           bool overwrite, zfs_error* error)
+{
+    const zfs_import_request request = {
+        .partition = part,
+        .host_paths = hosts,
+        .count = count,
+        .path = path,
+        .overwrite = overwrite,
+    };
+    return zfs_import_files(disk, &request, error);
 }
 
 zfs_status zfs_import(zfs_disk* disk, int part, const char* host, const char* path, zfs_error* error)
@@ -1831,18 +1863,18 @@ zfs_status zfs_core_copy_file(zfs_disk* source, int source_partition, zfs_disk* 
     return status;
 }
 
-zfs_status zfs_core_files_equal(zfs_disk* source, int source_partition, zfs_disk* target, int target_partition,
-                                const char* path, bool* equal, zfs_error* error)
+zfs_status zfs_core_files_equal(zfs_partition_ref source, zfs_partition_ref target, const char* path, bool* equal,
+                                zfs_error* error)
 {
     filesystem* source_fs = NULL;
     filesystem* target_fs = NULL;
     *equal = false;
-    zfs_status status = fs_open(source, source_partition, &source_fs, error);
+    zfs_status status = fs_open(source.disk, source.partition, &source_fs, error);
     if (status != ZFS_OK) {
         return status;
     }
-    if (target != NULL) {
-        status = fs_open(target, target_partition, &target_fs, error);
+    if (target.disk != NULL) {
+        status = fs_open(target.disk, target.partition, &target_fs, error);
         if (status != ZFS_OK) {
             free(source_fs);
             return status;
@@ -1851,10 +1883,10 @@ zfs_status zfs_core_files_equal(zfs_disk* source, int source_partition, zfs_disk
     zealfs_fd_t source_file;
     zealfs_fd_t target_file;
     status = fs_error(zealfs_open(path, &source_fs->fs, &source_file), error);
-    if (status == ZFS_OK && target != NULL) {
+    if (status == ZFS_OK && target.disk != NULL) {
         status = fs_error(zealfs_open(path, &target_fs->fs, &target_file), error);
     }
-    if (status == ZFS_OK && target != NULL && source_file.entry.size != target_file.entry.size) {
+    if (status == ZFS_OK && target.disk != NULL && source_file.entry.size != target_file.entry.size) {
         free(source_fs);
         free(target_fs);
         return ZFS_OK;
@@ -1870,7 +1902,7 @@ zfs_status zfs_core_files_equal(zfs_disk* source, int source_partition, zfs_disk
         if (bytes_read != (int) chunk_size) {
             status = bytes_read < 0 ? fs_error(bytes_read, error) : zfs_error_set(error, ZFS_IO, "Short file read");
         }
-        if (status == ZFS_OK && target != NULL) {
+        if (status == ZFS_OK && target.disk != NULL) {
             bytes_read = zealfs_read(&target_fs->fs, &target_file, target_buffer, chunk_size, (int64_t) offset);
             if (bytes_read != (int) chunk_size) {
                 status = bytes_read < 0 ? fs_error(bytes_read, error) : zfs_error_set(error, ZFS_IO, "Short file read");
@@ -1889,7 +1921,11 @@ zfs_status zfs_core_files_equal(zfs_disk* source, int source_partition, zfs_disk
 zfs_status zfs_core_check_file(zfs_disk* disk, int part, const char* path, zfs_error* error)
 {
     bool equal;
-    return zfs_core_files_equal(disk, part, NULL, 0, path, &equal, error);
+    const zfs_partition_ref source = {
+        .disk = disk,
+        .partition = part,
+    };
+    return zfs_core_files_equal(source, (zfs_partition_ref){0}, path, &equal, error);
 }
 
 const char* zfs_recovery_backup(const zfs_disk* disk)
