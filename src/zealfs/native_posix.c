@@ -11,10 +11,16 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <sys/file.h>
+#include <ctype.h>
+#include <stdlib.h>
+#include <dirent.h>
 #ifdef __APPLE__
 #include <sys/disk.h>
+#include <sys/mount.h>
 #else
 #include <linux/fs.h>
+#include <sys/sysmacros.h>
 #endif
 zfs_status zfs_native_open(const char* path, bool write_access, zfs_native* fd, uint64_t* size, zfs_error* error)
 {
@@ -93,15 +99,6 @@ void zfs_native_close(zfs_native fd)
     }
 }
 
-#include <sys/file.h>
-#include <ctype.h>
-#include <stdlib.h>
-#include <dirent.h>
-#ifdef __APPLE__
-#include <sys/mount.h>
-#else
-#include <sys/sysmacros.h>
-#endif
 bool zfs_native_same(zfs_native first_device, zfs_native second_device)
 {
     struct stat first_info;

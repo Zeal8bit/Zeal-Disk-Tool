@@ -6,6 +6,9 @@
  */
 #include "internal.h"
 #include <string.h>
+#include <winioctl.h>
+#include <stddef.h>
+#include <stdlib.h>
 
 /* Bound each synchronous device I/O request; this is not the sector size. */
 #define DEVICE_IO_CHUNK_SIZE (1024 * 1024)
@@ -122,10 +125,6 @@ zfs_status zfs_discover(zfs_info* out, size_t capacity, size_t* count, zfs_error
     }
     return ZFS_OK;
 }
-
-#include <winioctl.h>
-#include <stddef.h>
-#include <stdlib.h>
 
 bool zfs_native_same(zfs_native first_device, zfs_native second_device)
 {

@@ -62,9 +62,18 @@ if(ZEALFS_BUILD_GUI)
     endif()
     find_library(RAYLIB_LIBRARY NAMES raylib HINTS ${RAYLIB_LIBRARY_DIR} REQUIRED)
     # Create the executable and give it all the sources gathered
-    add_executable(zeal_disk_tool src/ui/main.c src/ui/disk.c src/ui/popup.c src/ui/combo_disk.c
-        src/ui/message_box.c src/ui/menubar.c src/ui/statusbar.c src/ui/partition_viewer.c
-        src/ui/tinyfiledialogs.c src/ui/progress.c src/ui/raylib-nuklear.c)
+    add_executable(zeal_disk_tool
+        src/ui/main.c
+        src/ui/disk.c
+        src/ui/popup.c
+        src/ui/combo_disk.c
+        src/ui/message_box.c
+        src/ui/menubar.c
+        src/ui/statusbar.c
+        src/ui/partition_viewer.c
+        src/ui/tinyfiledialogs.c
+        src/ui/progress.c
+        src/ui/raylib-nuklear.c)
     target_include_directories(zeal_disk_tool PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated" include ${RAYLIB_INCLUDE_DIR})
     # Libraries to link to DiskTool regardless of the OS we are building for
     target_link_libraries(zeal_disk_tool PRIVATE zealfs_core ${RAYLIB_LIBRARY})

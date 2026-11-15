@@ -46,6 +46,18 @@ typedef struct {
     zealfs_context_t fs;
 } filesystem;
 
+static uint32_t le32(const uint8_t* bytes)
+{
+    return (uint32_t) bytes[0] | ((uint32_t) bytes[1] << 8) | ((uint32_t) bytes[2] << 16) | ((uint32_t) bytes[3] << 24);
+}
+
+static void put32(uint8_t* bytes, uint32_t value)
+{
+    for (unsigned i = 0; i < sizeof(value); ++i) {
+        bytes[i] = (uint8_t) (value >> (i * 8));
+    }
+}
+
 const char* zfs_status_string(zfs_status status)
 {
     static const char* names[] = {
@@ -246,18 +258,6 @@ static zfs_status finish(zfs_disk* disk, zfs_status status, zfs_error* error)
         ++disk->revision;
     }
     return status;
-}
-
-static uint32_t le32(const uint8_t* bytes)
-{
-    return (uint32_t) bytes[0] | ((uint32_t) bytes[1] << 8) | ((uint32_t) bytes[2] << 16) | ((uint32_t) bytes[3] << 24);
-}
-
-static void put32(uint8_t* bytes, uint32_t value)
-{
-    for (unsigned i = 0; i < sizeof(value); ++i) {
-        bytes[i] = (uint8_t) (value >> (i * 8));
-    }
 }
 
 static zfs_status parse(zfs_disk* disk, zfs_error* error)

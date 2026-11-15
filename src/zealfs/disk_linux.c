@@ -11,6 +11,9 @@
 
 zfs_status zfs_discover(zfs_info* out, size_t capacity, size_t* count, zfs_error* error)
 {
+    char path[ZFS_PATH_MAX];
+    char partition[ZFS_PATH_MAX];
+
     if (count == NULL || (out == NULL && capacity != 0)) {
         return zfs_error_set(error, ZFS_INVALID, "Invalid discovery buffer");
     }
@@ -30,8 +33,6 @@ zfs_status zfs_discover(zfs_info* out, size_t capacity, size_t* count, zfs_error
             strncmp(name, "vd", 2) != 0) {
             continue;
         }
-        char path[ZFS_PATH_MAX];
-        char partition[ZFS_PATH_MAX];
         snprintf(partition, sizeof(partition), "/sys/class/block/%s/partition", name);
         /* Exclude partitions and eMMC boot/RPMB hardware regions. */
         if (access(partition, F_OK) == 0 || strstr(name, "boot") != NULL || strstr(name, "rpmb") != NULL) {

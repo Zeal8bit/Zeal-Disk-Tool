@@ -87,22 +87,27 @@ static void remove_trailing_slash(char* path)
 
 static int read_directory(const char* path_ro)
 {
+    char path[MAX_PATH_LENGTH + 1];
+    zfs_error error;
+    zfs_entry* raw;
+    size_t filled_entries;
+    int index;
+    partition_entry_t* entries;
+
     if (!m_part_ctx.disk || !m_part_ctx.partition) {
         return -1;
     }
-    char path[MAX_PATH_LENGTH + 1];
     snprintf(path, sizeof(path), "%s", path_ro);
     /* Remove trailing `/` if path is not `/` */
     remove_trailing_slash(path);
-    zfs_error error;
-    zfs_entry* raw = NULL;
-    size_t filled_entries = 0;
-    int index = (int) (m_part_ctx.partition - m_part_ctx.disk->partitions);
+    raw = NULL;
+    filled_entries = 0;
+    index = (int) (m_part_ctx.partition - m_part_ctx.disk->partitions);
     if (zfs_list(m_part_ctx.disk->handle, index, path, &raw, &filled_entries, &error)) {
         ui_statusbar_print(error.message);
         return -1;
     }
-    partition_entry_t* entries = calloc(filled_entries ? filled_entries : 1, sizeof(*entries));
+    entries = calloc(filled_entries ? filled_entries : 1, sizeof(*entries));
     if (!entries) {
         zfs_entries_free(raw);
         ui_statusbar_print("Not enough memory to display directory");
@@ -199,33 +204,39 @@ static void change_directory(const char* directory)
 
 static void create_directory(void)
 {
-    const char* folder_name = tinyfd_inputBox("New Folder", "Enter folder name (max 16 bytes):", "");
+    const char* folder_name;
+    char path[MAX_PATH_LENGTH];
+    zfs_error error;
+    zfs_status ret;
+
+    folder_name = tinyfd_inputBox("New Folder", "Enter folder name (max 16 bytes):", "");
     if (!folder_name) {
         return;
     }
-    char path[MAX_PATH_LENGTH];
     if (snprintf(path, sizeof(path), "%s%s", m_part_ctx.address_bar, folder_name) >= (int) sizeof(path)) {
         ui_statusbar_print("Path is too long");
         return;
     }
-    zfs_error error;
-    zfs_status ret = zfs_mkdir(m_part_ctx.disk->handle, current_partition(), path, &error);
+    ret = zfs_mkdir(m_part_ctx.disk->handle, current_partition(), path, &error);
     mutation_result(ret, &error, "Folder creation staged");
 }
 
 static void delete_entry(void)
 {
+    zfs_entry* entry;
+    char path[MAX_PATH_LENGTH];
+    zfs_error error;
+    zfs_status ret;
+
     if (m_part_ctx.entries_count <= 0) {
         return;
     }
-    zfs_entry* entry = &m_part_ctx.entries_raw[m_part_ctx.selected_file];
-    char path[MAX_PATH_LENGTH];
+    entry = &m_part_ctx.entries_raw[m_part_ctx.selected_file];
     if (snprintf(path, sizeof(path), "%s%s", m_part_ctx.address_bar, entry->name) >= (int) sizeof(path)) {
         ui_statusbar_print("Path is too long");
         return;
     }
-    zfs_error error;
-    zfs_status ret = zfs_remove(m_part_ctx.disk->handle, current_partition(), path, entry->directory, &error);
+    ret = zfs_remove(m_part_ctx.disk->handle, current_partition(), path, entry->directory, &error);
     mutation_result(ret, &error, "Deletion staged");
 }
 
@@ -236,30 +247,34 @@ static void gui_progress(void* user, uint64_t done, uint64_t total)
 }
 static void extract_selected_file(void)
 {
+    zfs_entry* entry;
+    const char* destination;
+    char path[MAX_PATH_LENGTH];
+    zfs_error error;
+    zfs_status ret;
+
     if (m_part_ctx.entries_count <= 0) {
         return;
     }
-    zfs_entry* entry = &m_part_ctx.entries_raw[m_part_ctx.selected_file];
+    entry = &m_part_ctx.entries_raw[m_part_ctx.selected_file];
     /* At the moment, only extarct files, not directories */
     if (entry->directory) {
         ui_statusbar_print("Only files can be extracted");
         return;
     }
     /* Where to save the file */
-    const char* destination = tinyfd_saveFileDialog("Export file", entry->name, 0, NULL, NULL);
+    destination = tinyfd_saveFileDialog("Export file", entry->name, 0, NULL, NULL);
     if (!destination) {
         /* Abort since the dialog was closed */
         return;
     }
-    char path[MAX_PATH_LENGTH];
     if (snprintf(path, sizeof(path), "%s%s", m_part_ctx.address_bar, entry->name) >= (int) sizeof(path)) {
         ui_statusbar_print("Path is too long");
         return;
     }
-    zfs_error error;
     disk_init_progress_bar();
     zfs_set_callbacks(m_part_ctx.disk->handle, (zfs_callbacks){.progress = gui_progress});
-    zfs_status ret = zfs_export(m_part_ctx.disk->handle, current_partition(), path, destination, true, &error);
+    ret = zfs_export(m_part_ctx.disk->handle, current_partition(), path, destination, true, &error);
     zfs_set_callbacks(m_part_ctx.disk->handle, (zfs_callbacks){0});
     disk_destroy_progress_bar();
     ui_statusbar_print(ret ? error.message : "File exported");
@@ -267,8 +282,13 @@ static void extract_selected_file(void)
 
 static int import_file(const char* file_path)
 {
+    const char* filename;
+    char path[MAX_PATH_LENGTH];
+    zfs_error error;
+    zfs_status ret;
+
     /* Check if the file name complies with the FS restrictions */
-    const char* filename = disk_get_basename(file_path);
+    filename = disk_get_basename(file_path);
     if (strlen(filename) > ZFS_NAME_MAX) {
         filename = tinyfd_inputBox("Rename File", "Enter a name (max 16 bytes):", "");
     }
@@ -276,15 +296,13 @@ static int import_file(const char* file_path)
         return 0;
     }
     /* Filename is correct, generate the absolute path and create it! */
-    char path[MAX_PATH_LENGTH];
     if (snprintf(path, sizeof(path), "%s%s", m_part_ctx.address_bar, filename) >= (int) sizeof(path)) {
         ui_statusbar_print("Path is too long");
         return 0;
     }
-    zfs_error error;
     disk_init_progress_bar();
     zfs_set_callbacks(m_part_ctx.disk->handle, (zfs_callbacks){.progress = gui_progress});
-    zfs_status ret = zfs_import(m_part_ctx.disk->handle, current_partition(), file_path, path, &error);
+    ret = zfs_import(m_part_ctx.disk->handle, current_partition(), file_path, path, &error);
     zfs_set_callbacks(m_part_ctx.disk->handle, (zfs_callbacks){0});
     disk_destroy_progress_bar();
     mutation_result(ret, &error, "File import staged");
