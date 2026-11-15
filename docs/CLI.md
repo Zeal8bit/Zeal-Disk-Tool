@@ -87,13 +87,56 @@ Sizes are integers in bytes, optionally followed by `B`, `KiB`, `MiB` or `GiB`. 
 | `mkdir FS_PATH` | Create a directory; its parent must exist |
 | `rm FS_PATH` | Delete a file |
 | `rmdir FS_PATH` | Delete an empty directory |
-| `import HOST_PATH FS_PATH` | Copy one host file into a new filesystem file |
-| `export FS_PATH HOST_PATH` | Export a file or a directory's contents to the host |
+| `import HOST_PATH... FS_PATH` | Import host files or filename patterns; directory destinations retain filenames |
+| `export FS_PATH HOST_PATH` | Export a file, filename pattern, or directory's contents to the host |
 | `merge` | Update the target from a source image/device; see below |
 | `restore` | Replace a partition from its raw backup; see below |
 | `shell` | Start an interactive session |
 
 Partition creation without `--size` uses the largest available extent, capped at 4 GiB. A raw partition starts at byte 0. Existing partitions are not resized or moved. Nonempty directory deletion and recursive host-directory import are not supported.
+
+### Bulk file transfers
+
+`import` accepts one or more host files or filename patterns. When the destination
+is an existing ZealFS directory, each source keeps its filename. A trailing `/`
+explicitly requests a directory; patterns and multiple sources always require an
+existing destination directory. A single source can still specify a new filename
+to rename it.
+
+```text
+zdt> mkdir games
+zdt> import *.bin *.zar games/
+zdt> import file.txt /games
+zdt> apply
+zdt> export games/*.bin ./downloaded-games
+zdt> export games/file.txt ./downloaded-games/
+```
+
+Skip `mkdir` if the directory already exists. Relative host sources are resolved
+from the directory where `zdt` was launched. `export` creates a host directory for
+a pattern; a single file keeps its basename when the host destination is an
+existing directory or ends with a separator. Otherwise, the destination is its
+host filename.
+
+Patterns support `*` (zero or more characters) and `?` (one character) in the
+final filename component, with case-sensitive matching on all platforms. They
+select regular files in that directory, without recursion; leading-dot names
+match only a pattern beginning with a dot. No matches produce an error. Quote
+patterns when running a one-shot command so the host shell leaves expansion to
+`zdt`:
+
+```sh
+zdt -d /dev/rdisk4 import '*.bin' '*.zar' games/ --yes
+zdt -d /dev/rdisk4 export 'games/*.zar' ./downloaded-assets
+```
+
+Imports ask once before replacing existing ZealFS files; answer `y` to replace
+matching files in the batch. One-shot `--yes` also authorizes replacement.
+Directories are never replaced by files. Each import command stages its entire
+batch atomically: cancellation or a failed file rolls back that batch and preserves
+earlier staged changes. One-shot confirmation and `--dry-run` cover the whole batch.
+Exports retain their existing overwrite confirmation and validate the complete
+selection before writing; an I/O failure during export may leave completed files.
 
 ### Confirmation and dry runs
 
@@ -118,7 +161,7 @@ zdt> apply
 zdt> quit
 ```
 
-You can also start `zdt shell` without a target, then use `open -i disk.img` or `open -d DEVICE`. The shell is a command prompt for Zeal Disk Tool, not an operating-system shell: it does not run other programs or expand variables, `~`, wildcards or substitutions. It accepts single/double quoted arguments; a backslash escapes the matching quote inside a quoted token, and is otherwise literal.
+You can also start `zdt shell` without a target, then use `open -i disk.img` or `open -d DEVICE`. The shell is a command prompt for Zeal Disk Tool, not an operating-system shell: it does not run other programs or expand variables, `~`, or substitutions. Import and export resolve source filename wildcards as described above. It accepts single/double quoted arguments; a backslash escapes the matching quote inside a quoted token, and is otherwise literal.
 
 Shell commands use the open target. The commands above are available, plus:
 

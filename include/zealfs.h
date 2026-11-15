@@ -90,8 +90,16 @@ void zfs_entries_free(zfs_entry* entries);
 zfs_status zfs_usage(zfs_disk* disk, int partition, uint64_t* free_bytes, uint64_t* total_bytes, zfs_error* error);
 zfs_status zfs_mkdir(zfs_disk* disk, int partition, const char* path, zfs_error* error);
 zfs_status zfs_remove(zfs_disk* disk, int partition, const char* path, bool directory, zfs_error* error);
+/* Import one file or filename pattern (*, ?). An existing destination directory
+ * preserves source basenames; patterns require a directory. zfs_import does not
+ * overwrite. zfs_import_many can replace files when overwrite is true; directories
+ * are never replaced. The entire batch is one atomic staged operation. */
 zfs_status zfs_import(zfs_disk* disk, int partition, const char* host_path, const char* path, zfs_error* error);
-/* Files export to host_path; directories recursively export their contents into
+zfs_status zfs_import_many(zfs_disk* disk, int partition, const char* const* host_paths, size_t count, const char* path,
+                           bool overwrite, zfs_error* error);
+/* Files export to host_path (or their basename within a directory); filename
+ * patterns (*, ?) export matching files into a host directory. Patterns apply
+ * only to the final component. Directories recursively export their contents into
  * host_path. Existing unrelated host entries are preserved. Each file publishes
  * atomically; an I/O failure may leave already-exported files/directories. */
 zfs_status zfs_export(zfs_disk* disk, int partition, const char* path, const char* host_path, bool overwrite,

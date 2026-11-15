@@ -62,7 +62,7 @@ static int compare_names(const void* a, const void* b)
 }
 
 static zfs_status walk(zfs_disk* d, int part, char* path, char* host, bool directory, bool write, bool overwrite,
-                       bool* exists, zfs_error* e)
+                       bool* exists, const char* pattern, zfs_error* e)
 {
     zfs_status s = zfs_core_export_destination(d, host, e);
     if (s) {
@@ -91,6 +91,19 @@ static zfs_status walk(zfs_disk* d, int part, char* path, char* host, bool direc
     if (s) {
         return s;
     }
+    if (pattern) {
+        size_t selected = 0;
+        for (size_t i = 0; i < count; ++i) {
+            if (!entries[i].directory && zfs_wildcard_match(pattern, entries[i].name)) {
+                entries[selected++] = entries[i];
+            }
+        }
+        count = selected;
+        if (!count) {
+            zfs_entries_free(entries);
+            return zfs_error_set(e, ZFS_NOT_FOUND, "No files match: %s", pattern);
+        }
+    }
     if (count > 1) {
         qsort(entries, count, sizeof(*entries), compare_names);
     }
@@ -110,7 +123,7 @@ static zfs_status walk(zfs_disk* d, int part, char* path, char* host, bool direc
         if (n < 0 || (size_t) n >= 512 - source_length || m < 0 || (size_t) m >= ZFS_PATH_MAX - host_length) {
             s = zfs_error_set(e, ZFS_INVALID, "Export path is too long");
         } else {
-            s = walk(d, part, path, host, entries[i].directory, write, overwrite, exists, e);
+            s = walk(d, part, path, host, entries[i].directory, write, overwrite, exists, NULL, e);
         }
         path[source_length] = 0;
         host[host_length] = 0;
@@ -122,19 +135,79 @@ static zfs_status walk(zfs_disk* d, int part, char* path, char* host, bool direc
 static zfs_status export_tree(zfs_disk* d, int part, const char* path, const char* host, bool write, bool overwrite,
                               zfs_error* e)
 {
-    bool directory, exists = false;
-    zfs_status s = zfs_core_path_directory(d, part, path, &directory, e);
-    if (!s) {
-        s = zfs_core_export_destination(d, host, e);
+    if (!path || !*path || strlen(path) >= 512) {
+        return zfs_error_set(e, ZFS_INVALID, "Invalid export source path");
     }
+    zfs_status s = zfs_core_export_destination(d, host, e);
     if (s) {
         return s;
     }
     /* Reuse one pair of path buffers at every depth to keep traversal stack use bounded. */
-    char source[512], destination[ZFS_PATH_MAX];
+    char source[512], destination[ZFS_PATH_MAX], pattern[512];
     strcpy(source, path);
     strcpy(destination, host);
-    s = walk(d, part, source, destination, directory, write, overwrite, &exists, e);
+    bool matching = strpbrk(path, "*?") != NULL;
+    if (matching) {
+        char* slash = strrchr(source, '/');
+        if (!slash || strcspn(source, "*?") < (size_t) (slash + 1 - source)) {
+            return zfs_error_set(e, ZFS_INVALID, "Wildcards are supported in filenames, not directory names");
+        }
+        strcpy(pattern, slash + 1);
+        if (slash == source) {
+            slash[1] = 0;
+        } else {
+            *slash = 0;
+        }
+    }
+    bool directory, exists = false;
+    s = zfs_core_path_directory(d, part, source, &directory, e);
+    if (s) {
+        return s;
+    }
+    if (matching && !directory) {
+        return zfs_error_set(e, ZFS_INVALID, "Wildcard export source must be a directory");
+    }
+    size_t length = strlen(destination);
+    bool host_directory = destination[length - 1] == '/';
+#ifdef _WIN32
+    host_directory = host_directory || destination[length - 1] == '\\';
+#endif
+    while (length > 1 && (destination[length - 1] == '/'
+#ifdef _WIN32
+                          || destination[length - 1] == '\\'
+#endif
+                          )) {
+#ifdef _WIN32
+        if (length == 3 && destination[1] == ':') {
+            break;
+        }
+#endif
+        destination[--length] = 0;
+    }
+    zfs_host_type kind;
+    s = zfs_host_kind(destination, &kind, e);
+    if (s) {
+        return s;
+    }
+    if (!directory && (host_directory || kind == ZFS_HOST_DIRECTORY)) {
+        if (kind != ZFS_HOST_DIRECTORY && kind != ZFS_HOST_MISSING) {
+            return zfs_error_set(e, ZFS_CONFLICT, "Export destination is not a directory: %s", host);
+        }
+        const char* name = strrchr(source, '/');
+        if (!name || !safe_name(name + 1)) {
+            return zfs_error_set(e, ZFS_INVALID, "Unsafe export filename");
+        }
+        if (write) {
+            s = zfs_host_mkdirs(destination, e);
+        }
+        int n = snprintf(destination + length, sizeof(destination) - length, "/%s", name + 1);
+        if (n < 0 || (size_t) n >= sizeof(destination) - length) {
+            return zfs_error_set(e, ZFS_INVALID, "Export destination path is too long");
+        }
+    }
+    if (!s) {
+        s = walk(d, part, source, destination, directory, write, overwrite, &exists, matching ? pattern : NULL, e);
+    }
     if (!s && exists && !overwrite) {
         s = zfs_error_set(e, ZFS_EXISTS, "Export would replace existing host files");
     }

@@ -1197,9 +1197,10 @@ zfs_status zfs_remove(zfs_disk* d, int part, const char* path, bool directory, z
     return entry_mutation(d, part, path, directory ? 2 : 1, e);
 }
 
-static zfs_status create_file(zfs_disk* d, int part, const char* path, FILE* source, const unsigned char* data,
-                              uint64_t size, zfs_error* e)
+static zfs_status write_file(filesystem* f, const char* path, FILE* source, const unsigned char* data, uint64_t size,
+                             zfs_error* e)
 {
+    zfs_disk* d = f->disk;
     zfs_status s = path_check(path, e);
     if (s) {
         return s;
@@ -1207,19 +1208,8 @@ static zfs_status create_file(zfs_disk* d, int part, const char* path, FILE* sou
     if (size > UINT32_MAX) {
         return zfs_error_set(e, ZFS_INVALID, "File exceeds ZealFS size limit");
     }
-    filesystem* f = NULL;
-    s = fs_open(d, part, &f, e);
-    if (s) {
-        return s;
-    }
     s = parent_check(f, path, e);
     if (s) {
-        free(f);
-        return s;
-    }
-    s = begin(d, e);
-    if (s) {
-        free(f);
         return s;
     }
     zealfs_fd_t fd;
@@ -1245,7 +1235,20 @@ static zfs_status create_file(zfs_disk* d, int part, const char* path, FILE* sou
         /* Flush the changes on the disk */
         s = fs_error(zealfs_flush(&f->fs, &fd), e);
     }
-    s = finish(d, s, e);
+    return s;
+}
+
+static zfs_status create_file(zfs_disk* d, int part, const char* path, FILE* source, const unsigned char* data,
+                              uint64_t size, zfs_error* e)
+{
+    filesystem* f = NULL;
+    zfs_status s = fs_open(d, part, &f, e);
+    if (!s) {
+        s = begin(d, e);
+        if (!s) {
+            s = finish(d, write_file(f, path, source, data, size, e), e);
+        }
+    }
     free(f);
     return s;
 }
@@ -1258,29 +1261,115 @@ zfs_status zfs_file_write(zfs_disk* d, int part, const char* path, const void* b
     return create_file(d, part, path, NULL, buffer, size, e);
 }
 
-zfs_status zfs_import(zfs_disk* d, int part, const char* host, const char* path, zfs_error* e)
+static int compare_import_paths(const void* a, const void* b)
 {
-    if (!host) {
-        return zfs_error_set(e, ZFS_INVALID, "Import path is required");
+    return strcmp(*(const char* const*) a, *(const char* const*) b);
+}
+
+static zfs_status import_file(filesystem* f, const char* host, const char* path, bool overwrite, zfs_error* e)
+{
+    zfs_status s = path_check(path, e);
+    if (s) {
+        return s;
     }
     FILE* file = zfs_host_open(host, "rb");
     if (!file) {
         return sys_error(e, "Cannot open import source");
     }
-    /* Get the size of the file by seeking to the end */
-#ifdef _WIN32
-    int seek_result = _fseeki64(file, 0, SEEK_END);
-#else
-    int seek_result = fseeko(file, 0, SEEK_END);
-#endif
-    int64_t size = zfs_tell(file);
-    if (seek_result || size < 0 || zfs_seek(file, 0)) {
-        fclose(file);
-        return zfs_error_set(e, ZFS_IO, "Cannot determine source size");
+    struct stat st;
+    if (fstat(fileno(file), &st)) {
+        s = sys_error(e, "Cannot inspect import source");
+    } else if ((st.st_mode & S_IFMT) != S_IFREG || st.st_size < 0) {
+        s = zfs_error_set(e, ZFS_INVALID, "Import sources must be regular files: %s", host);
+    } else {
+        zealfs_fd_t existing;
+        int result = zealfs_stat(path, &f->fs, &existing);
+        if (result >= 0 && (existing.entry.flags & IS_DIR)) {
+            s = zfs_error_set(e, ZFS_CONFLICT, "Import would replace a directory: %s", path);
+        } else if (result >= 0 && !overwrite) {
+            s = zfs_error_set(e, ZFS_EXISTS, "Import destination exists: %s", path);
+        } else if (result >= 0) {
+            s = fs_error(zealfs_unlink(path, &f->fs), e);
+        } else if (result != -ENOENT) {
+            s = fs_error(result, e);
+        }
+        if (!s) {
+            s = write_file(f, path, file, NULL, (uint64_t) st.st_size, e);
+        }
     }
-    zfs_status s = create_file(d, part, path, file, NULL, (uint64_t) size, e);
     fclose(file);
     return s;
+}
+
+zfs_status zfs_import_many(zfs_disk* d, int part, const char* const* hosts, size_t count, const char* path,
+                           bool overwrite, zfs_error* e)
+{
+    if (!hosts || !count || !path || !*path || strlen(path) >= 512) {
+        return zfs_error_set(e, ZFS_INVALID, "Import sources and a destination are required");
+    }
+    char destination[512];
+    strcpy(destination, path);
+    size_t length = strlen(destination);
+    bool require_directory = count > 1 || destination[length - 1] == '/';
+    while (length > 1 && destination[length - 1] == '/') {
+        destination[--length] = 0;
+    }
+    zfs_status s = path_check(destination, e);
+    char** sources = NULL;
+    size_t source_count = 0;
+    for (size_t i = 0; !s && i < count; ++i) {
+        if (hosts[i] && strpbrk(hosts[i], "*?")) {
+            require_directory = true;
+        }
+        s = zfs_host_expand(hosts[i], &sources, &source_count, e);
+    }
+    bool directory = false;
+    if (!s) {
+        s = zfs_core_path_directory(d, part, destination, &directory, e);
+        if (s == ZFS_NOT_FOUND && !require_directory) {
+            s = ZFS_OK;
+        } else if (!s && require_directory && !directory) {
+            s = zfs_error_set(e, ZFS_INVALID, "Multiple sources and patterns require a destination directory");
+        }
+    }
+    filesystem* f = NULL;
+    if (!s) {
+        s = fs_open(d, part, &f, e);
+    }
+    if (!s) {
+        qsort(sources, source_count, sizeof(*sources), compare_import_paths);
+        s = begin(d, e);
+        if (!s) {
+            for (size_t i = 0; !s && i < source_count; ++i) {
+                char target[512];
+                const char* name = sources[i];
+                for (const char* p = name; *p; ++p) {
+                    if (*p == '/'
+#ifdef _WIN32
+                        || *p == '\\'
+#endif
+                    ) {
+                        name = p + 1;
+                    }
+                }
+                int n = directory
+                            ? snprintf(target, sizeof(target), "%s%s%s", destination, length == 1 ? "" : "/", name)
+                            : snprintf(target, sizeof(target), "%s", destination);
+                s = n < 0 || (size_t) n >= sizeof(target)
+                        ? zfs_error_set(e, ZFS_INVALID, "Import destination path is too long")
+                        : import_file(f, sources[i], target, overwrite, e);
+            }
+            s = finish(d, s, e);
+        }
+    }
+    free(f);
+    zfs_host_paths_free(sources, source_count);
+    return s;
+}
+
+zfs_status zfs_import(zfs_disk* d, int part, const char* host, const char* path, zfs_error* e)
+{
+    return zfs_import_many(d, part, &host, 1, path, false, e);
 }
 
 zfs_status zfs_file_read(zfs_disk* d, int part, const char* path, uint64_t offset, void* buffer, size_t size,

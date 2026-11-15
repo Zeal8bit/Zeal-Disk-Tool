@@ -413,3 +413,160 @@ zfs_status zfs_host_mkdirs(const char* path, zfs_error* e)
     }
     return ZFS_OK;
 }
+
+#ifndef _WIN32
+#include <dirent.h>
+#endif
+
+static const char* next_character(const char* text)
+{
+    ++text;
+    while (((unsigned char) *text & 0xc0) == 0x80) {
+        ++text;
+    }
+    return text;
+}
+
+/* Match only filename components, consistently on every host. */
+bool zfs_wildcard_match(const char* pattern, const char* name)
+{
+    const char *star = NULL, *retry = NULL;
+    if (*name == '.' && *pattern != '.') {
+        return false;
+    }
+    while (*name) {
+        if (*pattern == '*') {
+            star = ++pattern;
+            retry = name;
+        } else if (*pattern == '?') {
+            ++pattern;
+            name = next_character(name);
+        } else if (*pattern == *name) {
+            ++pattern;
+            ++name;
+        } else if (star && *retry) {
+            pattern = star;
+            name = retry = next_character(retry);
+        } else {
+            return false;
+        }
+    }
+    while (*pattern == '*') {
+        ++pattern;
+    }
+    return !*pattern;
+}
+
+static zfs_status append_path(char*** paths, size_t* count, const char* path, zfs_error* e)
+{
+    if (*count >= SIZE_MAX / sizeof(**paths) - 1) {
+        return zfs_error_set(e, ZFS_NO_MEMORY, "Too many import sources");
+    }
+    char* copy = malloc(strlen(path) + 1);
+    if (!copy) {
+        return zfs_error_set(e, ZFS_NO_MEMORY, "Cannot allocate import path");
+    }
+    strcpy(copy, path);
+    char** grown = realloc(*paths, (*count + 1) * sizeof(*grown));
+    if (!grown) {
+        free(copy);
+        return zfs_error_set(e, ZFS_NO_MEMORY, "Cannot allocate import sources");
+    }
+    *paths = grown;
+    (*paths)[(*count)++] = copy;
+    return ZFS_OK;
+}
+
+void zfs_host_paths_free(char** paths, size_t count)
+{
+    for (size_t i = 0; i < count; ++i) {
+        free(paths[i]);
+    }
+    free(paths);
+}
+
+zfs_status zfs_host_expand(const char* pattern, char*** paths, size_t* count, zfs_error* e)
+{
+    if (!pattern || !*pattern || strlen(pattern) >= ZFS_PATH_MAX) {
+        return zfs_error_set(e, ZFS_INVALID, "Invalid import source path");
+    }
+    if (!strpbrk(pattern, "*?")) {
+        return append_path(paths, count, pattern, e);
+    }
+    const char* name = pattern;
+    for (const char* p = pattern; *p; ++p) {
+        if (separator(*p)) {
+            name = p + 1;
+        }
+    }
+    size_t prefix = (size_t) (name - pattern);
+    if (strcspn(pattern, "*?") < prefix) {
+        return zfs_error_set(e, ZFS_INVALID, "Wildcards are supported in filenames, not directory names");
+    }
+    char path[ZFS_PATH_MAX];
+    memcpy(path, pattern, prefix);
+    path[prefix] = 0;
+    size_t before = *count;
+    zfs_status s = ZFS_OK;
+#ifdef _WIN32
+    snprintf(path + prefix, sizeof(path) - prefix, "*");
+    wchar_t* search = wide(path);
+    WIN32_FIND_DATAW entry;
+    HANDLE directory = search ? FindFirstFileW(search, &entry) : INVALID_HANDLE_VALUE;
+    free(search);
+    if (directory == INVALID_HANDLE_VALUE) {
+        return zfs_error_set(e, ZFS_IO, "Cannot list import source directory: %s", pattern);
+    }
+    do {
+        if (entry.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_DEVICE)) {
+            continue;
+        }
+        if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, entry.cFileName, -1, path + prefix,
+                                 (int) (sizeof(path) - prefix), NULL, NULL)) {
+            s = zfs_error_set(e, ZFS_INVALID, "Import source path is too long or cannot be decoded");
+            break;
+        }
+        if (zfs_wildcard_match(name, path + prefix)) {
+            s = append_path(paths, count, path, e);
+        }
+    } while (!s && FindNextFileW(directory, &entry));
+    DWORD failure = GetLastError();
+    FindClose(directory);
+    if (!s && failure != ERROR_NO_MORE_FILES) {
+        s = zfs_error_set(e, ZFS_IO, "Cannot finish listing import sources");
+    }
+#else
+    DIR* directory = opendir(prefix ? path : ".");
+    if (!directory) {
+        return zfs_error_set(e, errno == EACCES ? ZFS_PERMISSION : ZFS_IO, "Cannot list import source directory: %s",
+                             pattern);
+    }
+    for (;;) {
+        errno = 0;
+        struct dirent* entry = readdir(directory);
+        if (!entry) {
+            if (errno) {
+                s = zfs_error_set(e, ZFS_IO, "Cannot finish listing import sources");
+            }
+            break;
+        }
+        if (!zfs_wildcard_match(name, entry->d_name)) {
+            continue;
+        }
+        int n = snprintf(path + prefix, sizeof(path) - prefix, "%s", entry->d_name);
+        struct stat st;
+        if (n < 0 || (size_t) n >= sizeof(path) - prefix) {
+            s = zfs_error_set(e, ZFS_INVALID, "Import source path is too long");
+        } else if (stat(path, &st)) {
+            s = zfs_error_set(e, ZFS_IO, "Cannot inspect import source: %s", path);
+        } else if (S_ISREG(st.st_mode)) {
+            s = append_path(paths, count, path, e);
+        }
+        if (s) {
+            break;
+        }
+    }
+    closedir(directory);
+#endif
+    return s ? s : *count == before ? zfs_error_set(e, ZFS_NOT_FOUND, "No files match: %s", pattern) : ZFS_OK;
+}

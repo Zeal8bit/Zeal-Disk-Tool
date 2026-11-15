@@ -44,4 +44,7 @@ FILE* zfs_temp_sibling(const char* path, char* temporary, size_t capacity);
 int zfs_host_remove(const char* path);
 int zfs_host_publish(const char* temporary, const char* path, bool overwrite);
 int zfs_host_sync(FILE* file);
+bool zfs_wildcard_match(const char* pattern, const char* name);
+zfs_status zfs_host_expand(const char* pattern, char*** paths, size_t* count, zfs_error* error);
+void zfs_host_paths_free(char** paths, size_t count);
 #endif

@@ -37,6 +37,18 @@ All disk-changing API operations stage sectors; only `zfs_apply` writes the targ
 
 The overlay is a sparse temporary file with a sector bitmap, capped at 16 MiB of bitmap memory for a 64 GiB disk. Operation undo records stream to another temporary file; imported file contents do not accumulate in RAM. Temporary storage is private and removed on close. A storage failure that also prevents rollback marks the session failed; close/reopen it rather than continuing with uncertain staged state.
 
+`zfs_import` accepts a host filename or a final-component `*`/`?` pattern;
+`zfs_import_many` accepts an array of these sources. Patterns and multiple sources
+require an existing ZealFS destination directory. A single source also retains
+its basename when the destination is a directory; otherwise it uses the supplied
+filename. A trailing slash requires a directory. The entire batch is one atomic
+staged operation. `zfs_import` refuses replacement; `zfs_import_many` replaces
+existing files only with `overwrite=true`, and never replaces directories. `zfs_export` and
+`zfs_export_validate` accept the same filename patterns on the ZealFS side,
+selecting files without recursion and preserving their basenames in the host
+directory. Pattern matching is case-sensitive, and dot-prefixed names require a
+dot-prefixed pattern. No matches are an error. See [bulk transfers](CLI.md#bulk-file-transfers).
+
 Discard clears staged sectors and restores the original metadata. Discarding a new image cancels its publication, leaving a blank unpublished handle that may be closed or edited again. The GUI/CLI close that handle when discarding creation. There is no persistence of staged sessions across process exits.
 
 Image Apply checks for external changes, streams the merged image into a unique sibling file, flushes it, then replaces the target. New destinations are published without replacement. Existing POSIX image permissions are preserved. Use the actual image path rather than a symbolic link. Hard-linked image paths are replaced independently; other hard links keep the old inode. A failed pre-publication Apply retains pending data and leaves the original unchanged. Image Apply acquires a nonblocking advisory lock; cooperating writers are refused. Other programs must also respect that lock.

@@ -12,6 +12,7 @@ int cli_execute(cli_session* s, const cli_options* input)
     const cli_options* o = &normalized;
     bool merging = cli_command_matches(o, "merge", NULL, 1);
     bool restoring = cli_command_matches(o, "restore", NULL, 1);
+    bool importing = o->argc >= 3 && !strcmp(o->argv[0], "import");
     if (!merging && !restoring && (o->source || o->backup || o->source_partition >= 0)) {
         return cli_failure(o, 2, "usage", "Source and backup options are only valid for merge/restore");
     }
@@ -20,14 +21,22 @@ int cli_execute(cli_session* s, const cli_options* input)
         cli_command_matches(o, "rm", NULL, 2) || cli_command_matches(o, "rmdir", NULL, 2) ||
         cli_command_matches(o, "export", NULL, 3)) {
         path_argument = 1;
-    } else if (cli_command_matches(o, "import", NULL, 3)) {
-        path_argument = 2;
+    } else if (importing) {
+        path_argument = o->argc - 1;
     }
     char path[512];
     if (path_argument >= 0) {
         if (!cli_filesystem_path(o->argv[path_argument], path)) {
             return cli_failure(o, 1, "invalid argument",
                                "ZealFS path must be nonempty and shorter than 512 bytes including its root slash");
+        }
+        if (importing && strcmp(path, "/") && o->argv[path_argument][strlen(o->argv[path_argument]) - 1] == '/') {
+            size_t length = strlen(path);
+            if (length + 1 >= sizeof(path)) {
+                return cli_failure(o, 1, "invalid argument", "Import destination path is too long");
+            }
+            path[length] = '/';
+            path[length + 1] = 0;
         }
         normalized.argv[path_argument] = path;
     }
@@ -178,8 +187,20 @@ int cli_execute(cli_session* s, const cli_options* input)
             status = zfs_mkdir(s->disk, o->partition, o->argv[1], &e);
         } else if (cli_command_matches(o, "rm", NULL, 2) || cli_command_matches(o, "rmdir", NULL, 2)) {
             status = zfs_remove(s->disk, o->partition, o->argv[1], !strcmp(o->argv[0], "rmdir"), &e);
-        } else if (cli_command_matches(o, "import", NULL, 3)) {
-            status = zfs_import(s->disk, o->partition, o->argv[1], o->argv[2], &e);
+        } else if (importing) {
+            const char* sources[CLI_MAX_ARGS];
+            for (int i = 1; i < o->argc - 1; ++i) {
+                sources[i - 1] = o->argv[i];
+            }
+            status = zfs_import_many(s->disk, o->partition, sources, (size_t) o->argc - 2, o->argv[o->argc - 1],
+                                     o->yes || o->dry_run, &e);
+            if (status == ZFS_EXISTS) {
+                if (!o->yes && !cli_confirm("Overwrite existing import destination files?", false)) {
+                    return cli_failure(o, 3, "confirmation", "Import overwrite requires confirmation or --yes");
+                }
+                status = zfs_import_many(s->disk, o->partition, sources, (size_t) o->argc - 2, o->argv[o->argc - 1],
+                                         true, &e);
+            }
         } else {
             return cli_failure(o, 2, "usage", "Unknown command or incorrect arguments; use help");
         }

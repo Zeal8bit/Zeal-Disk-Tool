@@ -38,8 +38,8 @@ void cli_help(void)
          "                                 Create uses --size (default largest free extent)\n"
          "  ls [PATH]                      List a directory (default /)\n"
          "  mkdir PATH | rm PATH | rmdir PATH\n"
-         "  import HOST_PATH FS_PATH       Stage a file import (no overwrite)\n"
-         "  export FS_PATH HOST_PATH       Export a file or directory tree\n"
+         "  import HOST_PATH... FS_PATH    Import files or filename patterns\n"
+         "  export FS_PATH HOST_PATH       Export files, a filename pattern, or directory tree\n"
          "  merge                          Merge the source into the target\n"
          "  restore                        Restore a raw partition backup\n"
          "  shell                          Interactive session; commands above plus:\n"
@@ -48,7 +48,10 @@ void cli_help(void)
          "Names may be up to 16 bytes. Raw images use\n"
          "partition 1 and start at byte 0. Changes remain staged until Apply.\n"
          "Exit: 0 success, 1 operation error, 2 usage, 3 confirmation.\n"
-         "Shell input supports single/double quoted arguments; no expansion.");
+         "Import/export support * and ? in source filenames. Directory destinations retain filenames.\n"
+         "Replacing existing files requires confirmation or --yes.\n"
+         "Quote patterns in your host shell to let zdt expand them.\n"
+         "Shell input supports single/double quoted arguments; no variable expansion.");
 }
 
 void cli_shell_help(void)
@@ -62,8 +65,8 @@ void cli_shell_help(void)
          "  partition list | create | format | delete\n"
          "  ls [PATH]                      List a directory\n"
          "  mkdir PATH | rm PATH | rmdir PATH\n"
-         "  import HOST_PATH FS_PATH        Stage a file import\n"
-         "  export FS_PATH HOST_PATH        Export a file or directory tree\n"
+         "  import HOST_PATH... FS_PATH     Import files or filename patterns\n"
+         "  export FS_PATH HOST_PATH        Export files, a filename pattern, or directory tree\n"
          "  merge -i PATH | -d PATH [-b PATH]\n"
          "                                 Stage a merge into the clean target\n"
          "  restore -f PATH                Stage restoration of a raw partition backup\n"
@@ -81,5 +84,7 @@ void cli_shell_help(void)
          "  -d, --from-device PATH          Merge source device\n"
          "  -b, --backup PATH               Optional new partition backup\n\n"
          "Up/Down recall the last 32 commands for this session.\n"
+         "Import/export accept * and ? in source filenames; directory destinations retain filenames.\n"
+         "Replacing existing files requires confirmation.\n"
          "Disk changes remain staged until apply.");
 }
