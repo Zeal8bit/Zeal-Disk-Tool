@@ -1,14 +1,20 @@
 /**
  * SPDX-FileCopyrightText: 2025 Zeal 8-bit Computer <contact@zeal8bit.com>
+ * SPDX-FileCopyrightText: 2026 David Higgins <zoul0813@me.com>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 #pragma once
 
 #include <stdio.h>
+#include <sys/types.h>
 #include <stdint.h>
 #include <inttypes.h>
 #include <assert.h>
+
+#ifndef MIN
+#define MIN(a,b)    (((a) < (b)) ? (a) : (b))
+#endif
 
 #ifndef BIT
 #define BIT(X)  (1ULL << (X))
@@ -25,6 +31,14 @@
 #ifndef GB
 #define GB  (1073741824ULL)
 #endif
+
+#define ZEALFS_V2_MAGIC 'Z'
+#define ZEALFS_V2_VERSION 2
+/* Page bytes are 256 << page_size; encoding 8 is the largest supported page (64 KiB). */
+#define ZEALFS_V2_MAX_PAGE_SHIFT 8
+/* Preserve the supported 8 KiB minimum and 4 GiB maximum partition capacities. */
+#define ZEALFS_V2_MIN_PARTITION_SIZE (8 * KB)
+#define ZEALFS_V2_MAX_PARTITION_SIZE (4 * GB)
 
 /* Bit 0 is 1 if is directory */
 #define IS_DIR (1 << 0)
@@ -106,6 +120,8 @@ typedef struct zealfs_context_t {
     /* Cache for the FAT table, at most 64K entries */
     uint16_t fat[64*KB];
     size_t fat_size;
+    /* Borrowed diagnostic for the latest engine failure; no console output. */
+    const char* error_message;
 } zealfs_context_t;
 
 
@@ -113,7 +129,7 @@ typedef struct zealfs_context_t {
  * @brief Helper to get the recommended page size from a disk size.
  *
  */
-static inline int zealfsv2_page_size(long long part_size)
+static inline int zealfsv2_page_size(uint64_t part_size)
 {
     if (part_size <= 64*KB) {
         return 256;
@@ -140,6 +156,9 @@ static inline int zealfsv2_page_size(long long part_size)
 /**
  * @brief Format the partition.
  *
+ * @note Initializes filesystem metadata without console output. Frontends own
+ *       diagnostics; successful format geometry is not an error.
+ *
  * @param partition Pointer to the partition data.
  * @param size Size of the whole partition.
  *
@@ -148,8 +167,8 @@ static inline int zealfsv2_page_size(long long part_size)
 static inline int zealfsv2_format(uint8_t* partition, uint64_t size) {
     /* Initialize image header */
     zealfs_header_t* header = (zealfs_header_t*) partition;
-    header->magic = 'Z';
-    header->version = 2;
+    header->magic = ZEALFS_V2_MAGIC;
+    header->version = ZEALFS_V2_VERSION;
     /* According to the size of the disk, we have to calculate the size of the pages */
     const int page_size_bytes = zealfsv2_page_size(size);
     /* The page size in the header is the log2(page_bytes/256) - 1 */
@@ -170,17 +189,7 @@ static inline int zealfsv2_format(uint8_t* partition, uint64_t size) {
         /* It's always the last page that has the reserved pages, generate the bitmap */
         uint32_t bitmap = 0xFF << last_valid_pages_count;
         header->pages_bitmap[header->bitmap_size - 1] = (uint8_t) (bitmap & 0xff);
-        printf("Last bitmap byte is: %x\n", (bitmap & 0xff));
     }
-
-    printf("[ZEALFS] Partition size: %" PRIu64 " bytes\n", size);
-    printf("[ZEALFS] Bitmap size: %d bytes\n", header->bitmap_size);
-    printf("[ZEALFS] Pages size: %d bytes (code %d)\n", page_size_bytes, ((page_size_bytes >> 8) - 1));
-#if 0
-    printf("[ZEALFS] Maximum root entries: %d\n", get_root_dir_max_entries(header));
-    printf("[ZEALFS] Maximum dir entries: %d\n", get_dir_max_entries(header));
-    printf("[ZEALFS] Header size/Root entries: %d (0x%x)\n", get_fs_header_size(header), get_fs_header_size(header));
-#endif
 
     return 0;
 }
@@ -241,8 +250,7 @@ int zealfs_open(const char * path, zealfs_context_t* ctx, zealfs_fd_t* fd);
  * @param offset The offset in the file from which to start reading.
  * @return The number of bytes read on success, or a negative error code on failure.
  */
-int zealfs_read(zealfs_context_t* ctx, zealfs_fd_t* fd, void *buf, size_t size, off_t offset);
-
+int zealfs_read(zealfs_context_t* ctx, zealfs_fd_t* fd, void* buf, size_t size, int64_t offset);
 
 /**
  * @brief Creates a new directory in the ZealFS file system.
@@ -312,8 +320,7 @@ int zealfs_rmdir(const char* path, zealfs_context_t* ctx);
  *
  * @return The amount of free space in bytes.
  */
-uint32_t zealfs_free_space(zealfs_context_t* ctx);
-
+uint64_t zealfs_free_space(zealfs_context_t* ctx);
 
 /**
  * Determines the size of the partition based on the count of bitmap pages.
@@ -325,8 +332,7 @@ uint32_t zealfs_free_space(zealfs_context_t* ctx);
  *
  * @return The size of the partition in bytes.
  */
-uint32_t zealfs_total_space(zealfs_context_t* ctx);
-
+uint64_t zealfs_total_space(zealfs_context_t* ctx);
 
 /**
  * @brief Writes data to a specified entry in the filesystem.
@@ -339,9 +345,7 @@ uint32_t zealfs_total_space(zealfs_context_t* ctx);
  *
  * @return 0 on success, or a negative error code on failure.
  */
-int zealfs_write(zealfs_context_t* ctx, zealfs_fd_t* fd,
-                void *buf, size_t size, off_t offset);
-
+int zealfs_write(zealfs_context_t* ctx, zealfs_fd_t* fd, void* buf, size_t size, int64_t offset);
 
 /**
  * @brief Applies changes to the File Allocation Table (FAT) and header on the disk.
@@ -355,3 +359,6 @@ int zealfs_write(zealfs_context_t* ctx, zealfs_fd_t* fd,
  *           changes need to be applied to the disk.
  */
 int zealfs_flush(zealfs_context_t* ctx, zealfs_fd_t* fd);
+
+/* Private engine helper: unlike opendir, returns the entry's metadata address. */
+int zealfs_stat(const char* path, zealfs_context_t* ctx, zealfs_fd_t* fd);

@@ -1,0 +1,25 @@
+# Requires clang-format 18 or newer for .clang-format-ignore support.
+# Split declarations manually; use trailing commas for one initializer per line.
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 120
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterControlStatement: Never
+PointerAlignment: Left
+DerivePointerAlignment: false
+SpaceAfterCStyleCast: true
+AllowShortFunctionsOnASingleLine: None
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortEnumsOnASingleLine: false
+BinPackArguments: false
+AllowAllArgumentsOnNextLine: false
+SpacesBeforeTrailingComments: 2
+InsertBraces: true
+SeparateDefinitionBlocks: Always
+SortIncludes: false
+ReflowComments: false

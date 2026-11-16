@@ -1,6 +1,7 @@
 
 /**
  * SPDX-FileCopyrightText: 2025 Zeal 8-bit Computer <contact@zeal8bit.com>
+ * SPDX-FileCopyrightText: 2026 David Higgins <zoul0813@me.com>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,7 +22,8 @@ void ui_menubar_create_mbr(struct nk_context *ctx, disk_info_t* disk)
         } else if (disk->has_staged_changes) {
             info.msg = "Disk has staged changes, cannot proceed. Apply or cancel the changes first";
         } else {
-            info.msg = "This change CANNOT be reverted, it will take effect immediately, are you sure?";
+            /* MBR creation is staged and can be discarded until Apply. */
+            info.msg = "Stage a new MBR? Use Apply to write it to disk, or Cancel to discard it.";
             info.data = (void*) 1;
         }
         popup_open(POPUP_MBR, 300, 140, &info);
