@@ -6,19 +6,28 @@
  */
 #ifndef DISK_H
 #define DISK_H
-/* GUI view models and adapters; public functional API is disk_tool.h. */
+/* GUI view models and adapters; public functional API is disk_tool.h.
+ * This layer, like the rest of the core, is plain C. The FLTK frontend is C++
+ * and only consumes these functions. */
 #include "disk_tool.h"
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #define DIM(arr) (sizeof(arr) / sizeof(*(arr)))
 #define GB UINT64_C(1073741824)
 #define MB UINT64_C(1048576)
 #define KB UINT64_C(1024)
+#ifndef MAX
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
+#endif
 #define MAX_DISKS 32
 #define MAX_PART_COUNT ZFS_MAX_PARTITIONS
 #define MAX_DISK_SIZE ZFS_MAX_DISK_SIZE
 #define DISK_LABEL_LEN 512
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef enum {
     ERR_SUCCESS,
@@ -50,7 +59,6 @@ typedef struct {
     int free_part_idx;
     zfs_disk* handle;
     unsigned revision;
-    uint32_t allocation_alignment;
 } disk_info_t;
 
 /**
@@ -65,6 +73,14 @@ typedef struct {
     /* View related */
     int selected_new_part_opt;
 } disk_list_state_t;
+
+/**
+ * @brief Receives user-facing messages produced by the model.
+ *
+ * The frontend registers a handler to display these messages (status bar,
+ * dialogs, ...). It is invoked synchronously from model functions.
+ */
+typedef void (*disk_status_fn)(const char* message, void* user);
 
 static inline disk_info_t* disk_get_current(disk_list_state_t* state)
 {
@@ -101,6 +117,9 @@ static inline const char* disk_get_basename(const char* path)
  * ============================================================================
  */
 
+/* Register the message sink used by every model operation below. */
+void disk_set_status_fn(disk_status_fn fn, void* user);
+
 disk_list_state_t* disk_get_state(void);
 disk_err_t disks_refresh(void);
 void disks_close(void);
@@ -109,31 +128,43 @@ void disk_revert_changes(disk_info_t* disk);
 const char* const* disk_get_partition_size_list(int* count);
 uint64_t disk_get_size_of_idx(int index);
 int disk_create_mbr(disk_info_t* disk);
-void disk_allocate_partition(disk_info_t* disk, uint32_t lba, uint32_t sectors_count);
+/* Stage a partition of `size_bytes`, aligned on `alignment` bytes.
+ * On success `index` receives its slot (0..3). */
+int disk_partition_create(disk_info_t* disk, uint64_t size_bytes, uint32_t alignment, int* index);
 const char* disk_format_partition(disk_info_t* disk, int partition);
 void disk_delete_partition(disk_info_t* disk, int partition);
+/* Largest free extent, aligned on `align`, and its starting byte address. */
 uint64_t disk_max_partition_size(disk_info_t* disk, uint32_t align, uint64_t* largest_free_addr);
 const char* disk_get_fs_type(uint8_t fs_byte);
 void disk_get_size_str(uint64_t size, char* buffer, int buffer_size);
 const char* disk_write_changes(disk_info_t* disk);
 
 /**
- * @brief Prompts the user to choose a disk image file to add to the disk list.
- *
- * This function allows the user to select a disk image file, which is then added
- * to the provided disk list state. It returns the index of the newly added disk
- * on success or a negative value if an error occurs.
- *
- * @param state A pointer to the disk list state where the disk image will be added.
- * @return int The index of the newly added disk on success, or a negative value on error.
+ * ============================================================================
+ *                          FILESYSTEM ADAPTERS
+ * ============================================================================
+ * These wrappers own the staged session and report failures through the status
+ * handler. They return 0 on success and a negative value on failure.
  */
-int disk_open_image_file(disk_list_state_t* state);
+
+/* `entries` is allocated and must be released with zfs_entries_free(). */
+int disk_fs_list(disk_info_t* disk, int partition, const char* path, zfs_entry** entries, size_t* count);
+/* Silent query used to paint usage indicators; returns 0 when available. */
+int disk_fs_usage(disk_info_t* disk, int partition, uint64_t* used_bytes, uint64_t* total_bytes);
+int disk_fs_mkdir(disk_info_t* disk, int partition, const char* path);
+int disk_fs_remove(disk_info_t* disk, int partition, const char* path, bool directory);
+/* `destination` is a filesystem directory (trailing `/` allowed) or the full
+ * target path when a single file is renamed. */
+int disk_fs_import(disk_info_t* disk, int partition, const char* const* host_paths, size_t count,
+                   const char* destination, zfs_progress_fn progress, void* user);
+int disk_fs_export(disk_info_t* disk, int partition, const char* path, const char* host_path,
+                   zfs_progress_fn progress, void* user);
 
 /**
  * @brief Open a disk image file from a given path and add it to the disk list.
  *
- * Unlike disk_open_image_file, this function does not prompt the user with
- * a file dialog. It directly opens the file at the given path.
+ * Unlike the file-dialog entry point of older frontends, this function does not
+ * prompt the user; the FLTK frontend owns host file dialogs.
  *
  * @param state A pointer to the disk list state where the disk image will be added.
  * @param path  Path to the image file to open.
@@ -142,4 +173,7 @@ int disk_open_image_file(disk_list_state_t* state);
 int disk_open_image_file_path(disk_list_state_t* state, const char* path);
 int disk_create_image(disk_list_state_t* state, const char* path, uint64_t size, bool init_mbr);
 
+#ifdef __cplusplus
+}
+#endif
 #endif  // DISK_H

@@ -1,11 +1,3 @@
-# Upstream headers and implementations keep their original formatting.
-
-include/nuklear.h
-include/raylib-nuklear.h
-include/raylib-nuklear-font.h
-include/ui/tinyfiledialogs.h
-src/ui/tinyfiledialogs.c
-
-# Generated embedded image data.
+# Generated image data keeps its generated layout.
 
 include/app_icon.h

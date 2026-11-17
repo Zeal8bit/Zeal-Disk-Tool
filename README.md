@@ -1,6 +1,6 @@
 # Zeal Disk Tool
 
-Zeal Disk Tool manages ZealFS v2 disk images and physical disks for the Zeal 8-bit Computer. It provides a graphical application, `zeal_disk_tool`, and a terminal tool, `zdt`, backed by the same C library.
+Zeal Disk Tool manages ZealFS v2 disk images and physical disks for the Zeal 8-bit Computer. It provides a graphical application, `zeal_disk_tool`, built with FLTK, and a terminal tool, `zdt`, backed by the same C library.
 
 ![Zeal Disk Tool](md_imgs/zeal_disk_tool_screen1.png)
 
@@ -16,7 +16,7 @@ The project supports macOS, Linux (including Raspberry Pi) and Windows. See [sup
 | [GUI](docs/GUI.md) | Open/create images, select cards, manage partitions, browse/import/export files, Apply and Cancel |
 | [ZealFS concepts](docs/ZEALFS.md) | MBR versus raw layouts, partition numbering, names, paths, allocation and capacity limits |
 | [Working with disks](docs/DISKS.md) | Shared staging behavior, image/device writes, imports/exports versus backups, permissions and discovery troubleshooting |
-| [Build and installation](docs/BUILD.md) | Supported platforms, CMake, Raylib, cross-compilation, packages and tests |
+| [Build and installation](docs/BUILD.md) | Supported platforms, CMake, FLTK, cross-compilation, packages and tests |
 | [C API](docs/API.md) | Embedding the shared library, ownership, errors, staging and transfer lifecycle |
 
 ## Get started
@@ -38,6 +38,6 @@ To update a card from a downloaded software image, follow [merge and restore](do
 
 ## License
 
-Apache-2.0; see [LICENSE](LICENSE). Existing copyright and third-party license notices are retained. Raylib and the bundled Nuklear adapter retain their own licenses.
+Apache-2.0; see [LICENSE](LICENSE). Existing copyright and third-party license notices are retained. FLTK is an external dependency and retains its own license.
 
 Contact: contact [at] zeal8bit [dot] com.

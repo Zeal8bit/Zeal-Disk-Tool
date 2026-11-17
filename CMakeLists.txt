@@ -21,7 +21,7 @@ endif()
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-option(ZEALFS_BUILD_GUI "Build the Raylib/Nuklear frontend" ON)
+option(ZEALFS_BUILD_GUI "Build the FLTK frontend" ON)
 option(ZEALFS_BUILD_CLI "Build the zdt console frontend" ON)
 option(ZEALFS_BUILD_TESTS "Build image-based core tests" ON)
 include(GNUInstallDirs)
@@ -56,37 +56,49 @@ install(FILES README.md LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
 install(DIRECTORY docs md_imgs DESTINATION ${CMAKE_INSTALL_DOCDIR})
 
 if(ZEALFS_BUILD_GUI)
-    # Check for Raylib path, either from the system path or from the toolchain file
-    if(NOT RAYLIB_INCLUDE_DIR)
-        find_path(RAYLIB_INCLUDE_DIR raylib.h REQUIRED)
-    endif()
-    find_library(RAYLIB_LIBRARY NAMES raylib HINTS ${RAYLIB_LIBRARY_DIR} REQUIRED)
-    # Create the executable and give it all the sources gathered
+    # The FLTK frontend is C++17; every other translation unit stays plain C.
+    # C++ is only required when the GUI is enabled, so CLI-only builds do not
+    # need a C++ compiler.
+    enable_language(CXX)
     add_executable(zeal_disk_tool
-        src/ui/main.c
-        src/ui/disk.c
-        src/ui/popup.c
-        src/ui/combo_disk.c
-        src/ui/message_box.c
-        src/ui/menubar.c
-        src/ui/statusbar.c
-        src/ui/partition_viewer.c
-        src/ui/tinyfiledialogs.c
-        src/ui/progress.c
-        src/ui/raylib-nuklear.c)
-    target_include_directories(zeal_disk_tool PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated" include ${RAYLIB_INCLUDE_DIR})
-    # Libraries to link to DiskTool regardless of the OS we are building for
-    target_link_libraries(zeal_disk_tool PRIVATE zealfs_core ${RAYLIB_LIBRARY})
+        src/gui/main.cpp
+        src/gui/MainWindow.cpp
+        src/gui/BrowserWindow.cpp
+        src/gui/PartitionBar.cpp
+        src/gui/Dialogs.cpp
+        src/gui/Gui.cpp
+        src/gui/model.c)
+    target_include_directories(zeal_disk_tool PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated" include)
+    set_target_properties(zeal_disk_tool PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+    target_link_libraries(zeal_disk_tool PRIVATE zealfs_core)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(zeal_disk_tool PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    # Prefer FLTK's modern CMake targets (FLTK 1.4). System packages of FLTK
+    # 1.3 ship a config module without imported targets, so fall back to the
+    # fltk-config helper, which also carries the platform link libraries.
+    find_package(FLTK CONFIG QUIET)
+    if(TARGET fltk::fltk)
+        target_link_libraries(zeal_disk_tool PRIVATE fltk::fltk)
+    elseif(TARGET fltk)
+        target_link_libraries(zeal_disk_tool PRIVATE fltk)
+    else()
+        find_program(FLTK_CONFIG_EXECUTABLE NAMES fltk-config REQUIRED)
+        execute_process(COMMAND "${FLTK_CONFIG_EXECUTABLE}" --cxxflags
+            OUTPUT_VARIABLE FLTK_CXX_FLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
+        execute_process(COMMAND "${FLTK_CONFIG_EXECUTABLE}" --ldflags
+            OUTPUT_VARIABLE FLTK_LD_FLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
+        separate_arguments(FLTK_CXX_FLAGS_LIST NATIVE_COMMAND "${FLTK_CXX_FLAGS}")
+        separate_arguments(FLTK_LD_FLAGS_LIST NATIVE_COMMAND "${FLTK_LD_FLAGS}")
+        target_compile_options(zeal_disk_tool PRIVATE ${FLTK_CXX_FLAGS_LIST})
+        target_link_libraries(zeal_disk_tool PRIVATE ${FLTK_LD_FLAGS_LIST})
+    endif()
     if(UNIX)
         target_link_libraries(zeal_disk_tool PRIVATE m)
     endif()
     # Include platform-specific options
     if(APPLE)
-        target_link_libraries(zeal_disk_tool PRIVATE
-            "-framework Cocoa"
-            "-framework IOKit"
-            "-framework OpenGL"
-            "-framework QuartzCore")
         include(packages/darwin.cmake)
         add_custom_target(gui_package DEPENDS mac_app)
     elseif(WIN32)
@@ -94,8 +106,8 @@ if(ZEALFS_BUILD_GUI)
         enable_language(RC)
         target_sources(zeal_disk_tool PRIVATE packages/appdir/zeal-disk-tool.rc)
         target_include_directories(zeal_disk_tool PRIVATE packages/icons packages/appdir)
-        # For Windows, we need to link a bit more libraries
-        target_link_libraries(zeal_disk_tool PRIVATE winmm gdi32 ole32 comctl32 shell32 uuid)
+        # FLTK itself may be static in cross builds; keep the common Win32 deps.
+        target_link_libraries(zeal_disk_tool PRIVATE comdlg32 comctl32 gdi32 ole32 shell32 uuid winmm)
         set_target_properties(zeal_disk_tool PROPERTIES WIN32_EXECUTABLE TRUE)
         if(MINGW)
             # Make the Windows target static, as such, no need for any .dll file
@@ -103,9 +115,6 @@ if(ZEALFS_BUILD_GUI)
         endif()
         install(TARGETS zeal_disk_tool RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     else()
-        find_package(OpenGL REQUIRED)
-        find_package(X11 REQUIRED)
-        target_link_libraries(zeal_disk_tool PRIVATE pthread dl OpenGL::GL ${X11_LIBRARIES})
         include(packages/appimage.cmake)
         add_custom_target(gui_package DEPENDS linux_appimage)
         # General install target for Linux

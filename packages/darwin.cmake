@@ -15,7 +15,20 @@ foreach(SIZE 16 32 128 256 512)
         COMMAND "${SIPS_EXECUTABLE}" -z ${DOUBLE_SIZE} ${DOUBLE_SIZE}
         "${CMAKE_SOURCE_DIR}/packages/icons/zeal-disk-tool.png" --out "${MAC_ICONSET}/icon_${SIZE}x${SIZE}@2x.png")
 endforeach()
-get_filename_component(RAYLIB_DEPENDENCY_DIR "${RAYLIB_LIBRARY}" DIRECTORY)
+# FLTK may be installed as a system or Homebrew framework/dylib. Bundle any
+# non-system dependencies it brings in, without assuming a specific layout.
+set(GUI_DEPENDENCY_DIR "")
+if(TARGET fltk::fltk)
+    get_target_property(FLTK_IMPORTED_LIBRARY fltk::fltk IMPORTED_LOCATION_RELEASE)
+    if(NOT FLTK_IMPORTED_LIBRARY)
+        get_target_property(FLTK_IMPORTED_LIBRARY fltk::fltk IMPORTED_LOCATION)
+    endif()
+    if(FLTK_IMPORTED_LIBRARY)
+        get_filename_component(GUI_DEPENDENCY_DIR "${FLTK_IMPORTED_LIBRARY}" DIRECTORY)
+    endif()
+elseif(DEFINED FLTK_LIBRARY)
+    get_filename_component(GUI_DEPENDENCY_DIR "${FLTK_LIBRARY}" DIRECTORY)
+endif()
 # Create macOS .app bundle
 add_custom_target(mac_app
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${MAC_BUNDLE}"
@@ -30,7 +43,7 @@ add_custom_target(mac_app
     COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:zeal_disk_tool>" "${MAC_BUNDLE}/Contents/MacOS/"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_BINARY_DIR}/Info.plist" "${MAC_BUNDLE}/Contents/"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_BINARY_DIR}/zeal-disk-tool.icns" "${MAC_BUNDLE}/Contents/Resources/"
-    COMMAND ${CMAKE_COMMAND} "-DBUNDLE=${MAC_BUNDLE}" "-DLIBRARY_DIR=${RAYLIB_DEPENDENCY_DIR}"
+    COMMAND ${CMAKE_COMMAND} "-DBUNDLE=${MAC_BUNDLE}" "-DLIBRARY_DIR=${GUI_DEPENDENCY_DIR}"
         -P "${CMAKE_SOURCE_DIR}/packages/macos/fixup.cmake"
     COMMAND "${CODESIGN_EXECUTABLE}" --force --deep --sign - "${MAC_BUNDLE}"
     DEPENDS zeal_disk_tool

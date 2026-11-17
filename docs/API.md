@@ -128,7 +128,7 @@ Only `zfs_apply` commits either operation. Merge/restore request flush and readb
 ## Source layout
 
 - [src/cli/](../src/cli/): terminal frontend, with its entry point in [main.c](../src/cli/main.c).
-- [src/ui/](../src/ui/): GUI frontend, including its [entry point](../src/ui/main.c), [disk adapter](../src/ui/disk.c), controls and Nuklear/Raylib integration.
+- [src/gui/](../src/gui/): FLTK GUI frontend, including its [entry point](../src/gui/main.cpp), C++ windows and dialogs, and the plain-C [disk adapter](../src/gui/model.c).
 - [src/zealfs/](../src/zealfs/): shared filesystem operations, host I/O and platform device backends used by both frontends.
 
-The GUI adapter translates shared API data into presentation models. GUI progress declarations live in `include/ui/progress.h`; they are internal to the frontend and are not part of the installed C API. Platform-specific device discovery and access remain in the shared core, independently of either frontend.
+The GUI adapter in `src/gui/model.c` translates shared API data into presentation models; only the FLTK presentation layer is C++. The frontend passes `zfs_progress_fn` callbacks to drive its progress dialog, so no GUI declarations are part of the installed C API. Platform-specific device discovery and access remain in the shared core, independently of either frontend.

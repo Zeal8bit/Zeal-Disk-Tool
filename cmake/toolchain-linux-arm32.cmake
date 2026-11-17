@@ -7,4 +7,5 @@ set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
-# GUI builds additionally need an ARMv7 hard-float Raylib build and its X11/GL dependencies.
+# GUI builds additionally need an ARMv7 hard-float FLTK build and its X11 dependencies.
+# Point FLTK_DIR or CMAKE_PREFIX_PATH at the target installation.

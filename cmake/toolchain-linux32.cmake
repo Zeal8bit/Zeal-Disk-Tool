@@ -5,6 +5,5 @@ set(CMAKE_C_FLAGS "-m32")
 set(CMAKE_CXX_FLAGS "-m32")
 set(CMAKE_EXE_LINKER_FLAGS "-m32")
 
-# Provide raylib location for cross target
-set(RAYLIB_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/raylib/win32/include)
-set(RAYLIB_LIBRARY_DIR ${CMAKE_SOURCE_DIR}/raylib/win32/lib)
+# GUI cross-builds need a 32-bit FLTK installation for the target; point
+# FLTK_DIR or CMAKE_PREFIX_PATH at it. The core and CLI need no GUI dependency.

@@ -2,5 +2,6 @@
 Name=Zeal Disk Tool
 Exec=zeal_disk_tool
 Icon=zeal-disk-tool
+StartupWMClass=Zeal-disk-tool
 Type=Application
 Categories=Utility;
