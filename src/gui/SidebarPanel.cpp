@@ -38,7 +38,7 @@ static void draw_row_background(int x, int w, int row_y, int row_h, Fl_Color fil
 SidebarPanel::SidebarPanel(int x, int y, int w, int h) : Fl_Widget(x, y, w, h)
 {
     box(FL_NO_BOX);
-    color(modern::color(modern::kPanel));
+    color(modern::color(modern::Palette::kPanel));
 }
 
 void SidebarPanel::refresh(disk_list_state_t *state, int selected_disk, int selected_slot)
@@ -108,53 +108,53 @@ void SidebarPanel::draw_scrollbar(int sx, int sy, int sh)
     const int thumb_h = std::max(28, track_h * visible / total);
     const int max_scroll = std::max(1, total - visible);
     const int thumb_y = sy + (track_h - thumb_h) * scroll_ / max_scroll;
-    modern::fill_round(sx, sy, 3, track_h, 2, modern::color(modern::kDividerSoft));
-    modern::fill_round(sx, thumb_y, 3, thumb_h, 2, modern::color(0xc3cbd6));
+    modern::fill_round(sx, sy, 3, track_h, 2, modern::color(modern::Palette::kDividerSoft));
+    modern::fill_round(sx, thumb_y, 3, thumb_h, 2, modern::color(modern::Palette::kScrollThumb));
 }
 
 void SidebarPanel::draw()
 {
-    fl_color(modern::color(modern::kPanel));
+    fl_color(modern::color(modern::Palette::kPanel));
     fl_rectf(x(), y(), w(), h());
-    fl_color(modern::color(modern::kDividerSoft));
+    fl_color(modern::color(modern::Palette::kDividerSoft));
     fl_line(x() + w() - 1, y(), x() + w() - 1, y() + h());
 
     /* Header */
-    modern::text("Disks", x() + 18, y() + 27, modern::color(modern::kDark), 13, true);
+    modern::text("Disks", x() + 18, y() + 27, modern::color(modern::Palette::kDark), 13, true);
     if (state_ != nullptr && state_->disk_count > 0) {
         modern::text(std::to_string(state_->disk_count),
                      x() + 64,
                      y() + 27,
-                     modern::color(modern::kGray2),
+                     modern::color(modern::Palette::kGray2),
                      10,
                      false);
     }
     const int add_x = x() + w() - 40;
     if (add_hover_) {
-        modern::fill_round(add_x - 1, y() + 7, 30, 30, 8, modern::color(modern::kHover));
+        modern::fill_round(add_x - 1, y() + 7, 30, 30, 8, modern::color(modern::Palette::kHover));
     }
-    modern::draw_glyph(modern::Glyph::Create, add_x + 14, y() + 22, 15, modern::color(modern::kAccent));
+    modern::draw_glyph(modern::Glyph::Create, add_x + 14, y() + 22, 15, modern::color(modern::Palette::kAccent));
 
     fl_push_clip(x(), y() + kHeaderHeight, w(), h() - kHeaderHeight);
 
     if (state_ == nullptr || state_->disk_count == 0) {
-        modern::draw_drive(x() + w() / 2 - 18, y() + kHeaderHeight + 44, 36, 36, modern::color(modern::kGray2));
+        modern::draw_drive(x() + w() / 2 - 18, y() + kHeaderHeight + 44, 36, 36, modern::color(modern::Palette::kGray2));
         modern::text_center("No disks detected",
                             x() + w() / 2,
                             y() + kHeaderHeight + 112,
-                            modern::color(modern::kDark),
+                            modern::color(modern::Palette::kDark),
                             13,
                             true);
         modern::text_center("Use + to open or create",
                             x() + w() / 2,
                             y() + kHeaderHeight + 132,
-                            modern::color(modern::kGray2),
+                            modern::color(modern::Palette::kGray2),
                             11,
                             false);
         modern::text_center("a disk image.",
                             x() + w() / 2,
                             y() + kHeaderHeight + 148,
-                            modern::color(modern::kGray2),
+                            modern::color(modern::Palette::kGray2),
                             11,
                             false);
         fl_pop_clip();
@@ -175,13 +175,13 @@ void SidebarPanel::draw()
             if (row.disk == selected_disk_ && selected_slot_ < 0) {
                 /* Only the overview state highlights the disk header; once a
                  * partition is selected, that row carries the selection. */
-                draw_row_background(x(), w(), row_y, row.h, modern::color(modern::kSelection));
+                draw_row_background(x(), w(), row_y, row.h, modern::color(modern::Palette::kSelection));
             } else if (hovered) {
-                draw_row_background(x(), w(), row_y, row.h, modern::color(modern::kHover));
+                draw_row_background(x(), w(), row_y, row.h, modern::color(modern::Palette::kHover));
             }
             const bool failed = !disk.valid;
             const Fl_Color icon_color =
-                failed ? modern::color(modern::kWarning) : modern::color(modern::kGray);
+                failed ? modern::color(modern::Palette::kWarning) : modern::color(modern::Palette::kGray);
             modern::draw_drive(x() + 16, row_y + 14, 30, 30, icon_color);
             char title[96];
             std::snprintf(title,
@@ -194,7 +194,7 @@ void SidebarPanel::draw()
                                  row_y + 12,
                                  w() - 84,
                                  18,
-                                 modern::color(failed ? modern::kWarning : modern::kDark),
+                                 modern::color(failed ? modern::Palette::kWarning : modern::Palette::kDark),
                                  12,
                                  true);
             const std::string subtitle =
@@ -204,11 +204,11 @@ void SidebarPanel::draw()
                                  row_y + 30,
                                  w() - 84,
                                  16,
-                                 modern::color(modern::kGray),
+                                 modern::color(modern::Palette::kGray),
                                  10,
                                  false);
             if (disk.has_staged_changes) {
-                modern::fill_circle(x() + w() - 20, row_y + 22, 4, modern::color(modern::kWarning));
+                modern::fill_circle(x() + w() - 20, row_y + 22, 4, modern::color(modern::Palette::kWarning));
             }
             continue;
         }
@@ -217,9 +217,9 @@ void SidebarPanel::draw()
         const partition_t &part = disk.partitions[row.slot];
         const bool selected = row.disk == selected_disk_ && row.slot == selected_slot_;
         if (selected) {
-            draw_row_background(x(), w(), row_y, row.h, modern::color(modern::kSelection));
+            draw_row_background(x(), w(), row_y, row.h, modern::color(modern::Palette::kSelection));
         } else if (hovered) {
-            draw_row_background(x(), w(), row_y, row.h, modern::color(modern::kHover));
+            draw_row_background(x(), w(), row_y, row.h, modern::color(modern::Palette::kHover));
         }
         const Fl_Color chip = modern::slot_color(row.slot);
         modern::draw_drive(x() + 28, row_y + (row.h - 18) / 2, 18, 18, chip);
@@ -230,7 +230,7 @@ void SidebarPanel::draw()
                              row_y + 9,
                              w() - 80,
                              17,
-                             modern::color(selected ? modern::kDark : modern::kDark2),
+                             modern::color(selected ? modern::Palette::kDark : modern::Palette::kDark2),
                              12,
                              selected);
         char subtitle[96];
@@ -244,7 +244,7 @@ void SidebarPanel::draw()
                              row_y + 26,
                              w() - 80,
                              15,
-                             modern::color(modern::kGray),
+                             modern::color(modern::Palette::kGray),
                              10,
                              false);
     }
@@ -317,7 +317,7 @@ int SidebarPanel::handle(int event)
         }
         return 1;
     case FL_MOUSEWHEEL:
-        scroll_by(-Fl::event_dy() * 40);
+        scroll_by(Fl::event_dy() * 40);
         return 1;
     default:
         break;

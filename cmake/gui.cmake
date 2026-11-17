@@ -13,8 +13,10 @@ add_executable(zeal_disk_tool
     src/gui/DiskMapPanel.cpp
     src/gui/DetailsPanel.cpp
     src/gui/FileBrowserPanel.cpp
+    src/gui/HostBrowserPanel.cpp
     src/gui/FileBrowserDraw.cpp
     src/gui/ModernStyle.cpp
+    src/gui/Theme.cpp
     src/gui/Dialogs.cpp
     src/gui/Utils.cpp
     src/gui/model.c)
@@ -78,7 +80,8 @@ elseif(WIN32)
     target_sources(zeal_disk_tool PRIVATE packages/appdir/zeal-disk-tool.rc)
     target_include_directories(zeal_disk_tool PRIVATE packages/icons packages/appdir)
     # FLTK itself may be static in cross builds; keep the common Win32 deps.
-    target_link_libraries(zeal_disk_tool PRIVATE comdlg32 comctl32 gdi32 ole32 shell32 uuid winmm)
+    # advapi32: the theme follows the Windows "apps use light theme" registry value.
+    target_link_libraries(zeal_disk_tool PRIVATE advapi32 comdlg32 comctl32 gdi32 ole32 shell32 uuid winmm)
     set_target_properties(zeal_disk_tool PROPERTIES WIN32_EXECUTABLE TRUE)
     if(MINGW)
         # Make the Windows target static, as such, no need for any .dll file

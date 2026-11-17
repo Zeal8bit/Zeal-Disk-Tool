@@ -31,6 +31,11 @@ public:
     void focus_list();
     void focus_search();
     void clear_search();
+    /* The disk pane of the dual browser hides its preview card and shows the
+     * copy-to-host action instead. */
+    void set_show_preview(bool show);
+    void set_transfer_hint(bool active);
+    bool export_selection_to_host(const std::string &directory);
 
     /* Menu entry points, shared with the browser's own action strip. */
     bool has_target() const { return target_valid_; }
@@ -63,6 +68,7 @@ private:
         Export,
         NewFolder,
         Delete,
+        CopyToHost,
         TableHeader,
         TableRow,
         TreeRow,
@@ -102,6 +108,7 @@ private:
     bool is_selected(int entry_index) const;
     int row_of_entry(int entry_index) const;
     void export_selection();
+    bool export_to_directory(const std::string &directory);
     void delete_selection();
     int selected_entry() const;
     std::string entry_path(int entry_index) const;
@@ -128,6 +135,7 @@ private:
     void draw_tree();
     void draw_table();
     void draw_preview();
+    void draw_transfer_hint();
     void draw_scrollbar(int sx, int sy, int sw, int sh, int total, int visible, int offset);
 
     static void search_cb(Fl_Widget *widget, void *data);
@@ -136,6 +144,14 @@ private:
 
     MainWindow *owner_ = nullptr;
     Fl_Input *search_ = nullptr;
+
+    bool show_preview_ = true;
+    bool show_tree_ = true;
+    bool transfer_hint_ = false;
+    bool drag_candidate_ = false;
+    bool dragging_ = false;
+    int drag_x_ = 0;
+    int drag_y_ = 0;
 
     disk_info_t *disk_ = nullptr;
     int slot_ = -1;
@@ -197,10 +213,12 @@ private:
     int export_x_ = 0;
     int new_folder_x_ = 0;
     int delete_x_ = 0;
+    int copy_x_ = 0;
     int import_w_ = 0;
     int export_w_ = 0;
     int new_folder_w_ = 0;
     int delete_w_ = 0;
+    int copy_w_ = 0;
     int preview_action_x_ = 0;
     int preview_action_y_ = 0;
     int preview_action_w_ = 0;

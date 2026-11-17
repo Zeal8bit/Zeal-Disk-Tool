@@ -72,6 +72,24 @@ Fl_Color darken(Fl_Color value, double amount)
     return fl_rgb_color((uchar) (red * keep), (uchar) (green * keep), (uchar) (blue * keep));
 }
 
+Fl_Color surface_tint(Fl_Color value, double amount)
+{
+    /* Blending towards white keeps the light theme's pastel chips; the dark
+     * theme blends towards its panel colour so the chip stays dark. */
+    uchar red = 0;
+    uchar green = 0;
+    uchar blue = 0;
+    Fl::get_color(value, red, green, blue);
+    uchar base_red = 0;
+    uchar base_green = 0;
+    uchar base_blue = 0;
+    Fl::get_color(color(Palette::kPanel), base_red, base_green, base_blue);
+    const double keep = 1.0 - amount;
+    return fl_rgb_color((uchar) (red * keep + base_red * amount),
+                        (uchar) (green * keep + base_green * amount),
+                        (uchar) (blue * keep + base_blue * amount));
+}
+
 static void set_font(int size, bool bold)
 {
     fl_font(bold ? FL_HELVETICA_BOLD : FL_HELVETICA, size);
@@ -241,7 +259,7 @@ void draw_drive(int x, int y, int w, int h, Fl_Color value_color)
 
 void draw_folder(int x, int y, int w, int h)
 {
-    draw_icon_box("folder", x, y, w, h, color(kFolder));
+    draw_icon_box("folder", x, y, w, h, color(Palette::kFolder));
 }
 
 FileKind file_kind(const char *name, bool directory)
@@ -287,7 +305,7 @@ static void draw_field(int x, int y, int w, int h, Fl_Color background)
     }
     fl_color(background);
     fl_rounded_rectf(x, y, w, h, 6);
-    fl_color(color(kDivider));
+    fl_color(color(Palette::kDivider));
     fl_rounded_rect(x, y, w, h, 6);
 }
 
@@ -302,9 +320,7 @@ Fl_Boxtype field_box()
 }
 
 ModernButton::ModernButton(int x, int y, int w, int h, const char *label, bool primary, Fl_Color accent)
-    : Fl_Button(x, y, w, h, label),
-      primary_(primary),
-      accent_(accent != 0 ? accent : modern::color(kAccent))
+    : Fl_Button(x, y, w, h, label), primary_(primary), accent_(accent)
 {
     box(FL_NO_BOX);
     labelsize(12);
@@ -313,19 +329,22 @@ ModernButton::ModernButton(int x, int y, int w, int h, const char *label, bool p
 void ModernButton::draw()
 {
     const bool enabled = active() && (parent() == nullptr || parent()->active());
-    Fl_Color fill = primary_ ? accent_ : modern::color(kPanel);
-    Fl_Color text = primary_ ? modern::color(kPanel) : modern::color(kDark2);
+    /* 0 means "the palette accent", resolved at draw time so a theme switch
+     * also recolours buttons that already exist. */
+    const Fl_Color accent = accent_ != 0 ? accent_ : modern::color(Palette::kAccent);
+    Fl_Color fill = primary_ ? accent : modern::color(Palette::kPanel);
+    Fl_Color text = primary_ ? modern::color(Palette::kOnAccent) : modern::color(Palette::kDark2);
     if (!enabled) {
-        fill = modern::color(kPanelAlt);
-        text = modern::color(0xb8c0cc);
+        fill = modern::color(Palette::kPanelAlt);
+        text = modern::color(Palette::kTextDisabled);
     } else if (value()) {
-        fill = primary_ ? darken(accent_, 0.10) : modern::color(kPressed);
+        fill = primary_ ? darken(accent, 0.10) : modern::color(Palette::kPressed);
     } else if (hover_) {
-        fill = primary_ ? darken(accent_, 0.04) : modern::color(kHover);
+        fill = primary_ ? darken(accent, 0.04) : modern::color(Palette::kHover);
     }
     fill_round(x(), y(), w(), h(), 6, fill);
     if (!primary_) {
-        stroke_round(x(), y(), w(), h(), 6, modern::color(enabled ? kButtonEdge : kDivider), 1);
+        stroke_round(x(), y(), w(), h(), 6, modern::color(enabled ? Palette::kButtonEdge : Palette::kDivider), 1);
     }
     const int size = h() >= 24 ? 12 : 10;
     /* Centre the label using the font's ascent/descent rather than a guessed
@@ -334,7 +353,7 @@ void ModernButton::draw()
     const int baseline = y() + (h() + fl_height()) / 2 - fl_descent();
     text_center(label() != nullptr ? label() : "", x() + w() / 2, baseline, text, size, false);
     if (enabled && Fl::focus() == this) {
-        stroke_round(x() + 1, y() + 1, w() - 2, h() - 2, 6, lighten(accent_, 0.45), 1);
+        stroke_round(x() + 1, y() + 1, w() - 2, h() - 2, 6, lighten(accent, 0.45), 1);
     }
 }
 
@@ -378,7 +397,7 @@ void draw_file(FileKind kind, int x, int y, int w, int h)
     case FileKind::Other:
         break;
     }
-    draw_icon_box(name, x, y, w, h, color(0x6b7684));
+    draw_icon_box(name, x, y, w, h, color(Palette::kIconMuted));
 }
 
 }  // namespace modern

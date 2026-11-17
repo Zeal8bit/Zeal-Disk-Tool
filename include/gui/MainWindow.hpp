@@ -11,12 +11,14 @@
 #include <vector>
 
 #include "disk.h"
+#include "gui/Theme.hpp"
 
 namespace modern {
 class ModernButton;
 }
 
 class Fl_Menu_Bar;
+class HostBrowserPanel;
 class SidebarPanel;
 class DiskMapPanel;
 class DetailsPanel;
@@ -40,12 +42,26 @@ public:
     void model_changed();
     void refresh_menu_states() { update_menu_states(); }
 
+    FileBrowserPanel *disk_browser() const { return files_; }
+    HostBrowserPanel *host_browser() const { return host_; }
+    /* Copy between the two browser panes. */
+    void copy_host_to_disk(const std::vector<std::string> &host_paths);
+    void copy_disk_to_host();
+
     void resize(int x, int y, int w, int h) override;
     void draw() override;
+    int handle(int event) override;
 
     bool confirm_quit();
 
 private:
+    enum class View {
+        Files,
+        Manage,
+    };
+
+    void set_view(View view);
+
     enum class MenuAction {
         OpenImage,
         CreateImage,
@@ -64,6 +80,11 @@ private:
         DeleteEntry,
         FocusBrowser,
         FocusSearch,
+        ViewFiles,
+        ViewManage,
+        AppearanceSystem,
+        AppearanceLight,
+        AppearanceDark,
         Shortcuts,
         About,
     };
@@ -88,6 +109,9 @@ private:
 
     void build_menu();
     void perform_menu_action(MenuAction action);
+    void sync_appearance_menu();
+    void set_appearance(modern::Theme preference);
+    void apply_theme();
     void update_menu_states();
     void set_menu_enabled(const char *path, bool enabled);
 
@@ -97,6 +121,7 @@ private:
     void layout_children();
 
     void draw_heading();
+    void draw_view_tabs();
     void draw_statusbar();
     void layout_chrome();
 
@@ -110,6 +135,7 @@ private:
     SidebarPanel *sidebar_ = nullptr;
     DiskMapPanel *map_ = nullptr;
     DetailsPanel *details_ = nullptr;
+    HostBrowserPanel *host_ = nullptr;
     FileBrowserPanel *files_ = nullptr;
 
     std::vector<std::string> image_paths_;
@@ -122,4 +148,11 @@ private:
     int sidebar_w_ = 260;
     int right_w_ = 288;
     int content_y_ = 0;
+    View view_ = View::Manage;
+    int tab_y_ = 0;
+    int tab_h_ = 0;
+    int tab_files_x_ = 0;
+    int tab_files_w_ = 0;
+    int tab_manage_x_ = 0;
+    int tab_manage_w_ = 0;
 };

@@ -117,12 +117,12 @@ void DiskMapPanel::draw_segment(const Segment &segment,
 
 void DiskMapPanel::draw()
 {
-    modern::fill_round(x(), y(), w(), h(), 8, modern::color(0xedf1f6));
+    modern::fill_round(x(), y(), w(), h(), 8, modern::color(modern::Palette::kMapBg));
     if (!has_disk_) {
         modern::text_center(disk_bytes_ == 0 ? "No disk selected" : "This disk has no readable size",
                             x() + w() / 2,
                             y() + h() / 2 + 4,
-                            modern::color(modern::kGray2),
+                            modern::color(modern::Palette::kGray2),
                             12,
                             false);
         return;
@@ -131,7 +131,7 @@ void DiskMapPanel::draw()
         modern::text_center("No partitions on this disk yet",
                             x() + w() / 2,
                             y() + h() / 2 + 4,
-                            modern::color(modern::kGray2),
+                            modern::color(modern::Palette::kGray2),
                             12,
                             false);
         return;
@@ -148,7 +148,7 @@ void DiskMapPanel::draw()
     }
 
     if (segments_.front().start > 0.02) {
-        modern::text("Free", left + 6, top + inner_h / 2 + 4, modern::color(modern::kGray2), 10, false);
+        modern::text("Free", left + 6, top + inner_h / 2 + 4, modern::color(modern::Palette::kGray2), 10, false);
     }
 }
 

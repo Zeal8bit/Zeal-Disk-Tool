@@ -25,11 +25,19 @@
 #include <vector>
 
 #include "gui/FileBrowserPanelInternal.hpp"
+#include "gui/HostBrowserPanel.hpp"
 #include "gui/MainWindow.hpp"
 #include "gui/ModernStyle.hpp"
 #include "gui/Utils.hpp"
 
 using namespace fbp;
+
+/* Window-relative point test; Fl_Widget only offers whole-widget containment. */
+static bool point_inside(const Fl_Widget *widget, int x, int y)
+{
+    return widget != nullptr && x >= widget->x() && x < widget->x() + widget->w() && y >= widget->y() &&
+           y < widget->y() + widget->h();
+}
 
 /* Modal progress window used while the synchronous core copies data. */
 class ProgressDialog {
@@ -38,18 +46,18 @@ public:
     {
         window_ = new Fl_Window(400, 118, title);
         window_->set_modal();
-        window_->color(modern::color(modern::kWindow));
+        window_->color(modern::color(modern::Palette::kWindow));
         label_ = new Fl_Box(FL_NO_BOX, 16, 12, 368, 40, detail.c_str());
         label_->align(FL_ALIGN_LEFT | FL_ALIGN_TOP | FL_ALIGN_INSIDE | FL_ALIGN_CLIP);
         label_->labelsize(12);
-        label_->labelcolor(modern::color(modern::kDark));
+        label_->labelcolor(modern::color(modern::Palette::kDark));
         progress_ = new Fl_Progress(16, 58, 368, 22);
         progress_->minimum(0);
         progress_->maximum(100);
         progress_->value(0);
         progress_->box(FL_DOWN_BOX);
-        progress_->color(modern::color(modern::kPanelAlt));
-        progress_->selection_color(modern::color(modern::kAccent));
+        progress_->color(modern::color(modern::Palette::kPanelAlt));
+        progress_->selection_color(modern::color(modern::Palette::kAccent));
         progress_->labelsize(0);
         window_->end();
         window_->position((Fl::w() - window_->w()) / 2, (Fl::h() - window_->h()) / 2);
@@ -219,8 +227,8 @@ FileBrowserPanel::FileBrowserPanel(int x, int y, int w, int h, MainWindow *owner
     search_->box(FL_DOWN_BOX);
     search_->textsize(12);
     search_->textfont(FL_HELVETICA);
-    search_->textcolor(modern::color(modern::kDark));
-    search_->cursor_color(modern::color(modern::kAccent));
+    search_->textcolor(modern::color(modern::Palette::kDark));
+    search_->cursor_color(modern::color(modern::Palette::kAccent));
     search_->when(FL_WHEN_CHANGED);
     search_->callback(search_cb, this);
     search_->tooltip("Filter the current folder");
@@ -263,14 +271,17 @@ void FileBrowserPanel::layout_geometry()
         drop_target_->resize(x(), body_y_, w(), std::max(1, y() + h() - body_y_));
     }
 
-    const int rail_rel = std::max(220, w() - right_width_);
+    const int rail_rel = show_preview_ ? std::max(220, w() - right_width_) : w();
     preview_x_ = x() + rail_rel;
-    preview_w_ = right_width_;
+    preview_w_ = show_preview_ ? right_width_ : 0;
 
     const int card_w_rel = rail_rel - 12;
-    tree_w_ = std::min(230, std::max(170, rail_rel / 5));
-    table_x_ = x() + tree_w_ + 10;
-    table_w_ = std::max(220, x() + card_w_rel - 10 - table_x_);
+    /* In the dual layout the disk pane is roughly half as wide; drop its folder
+     * tree rather than squeezing the file table into a few columns. */
+    show_tree_ = w() >= 520;
+    tree_w_ = show_tree_ ? std::min(230, std::max(170, rail_rel / 5)) : 0;
+    table_x_ = x() + (show_tree_ ? tree_w_ + 10 : 6);
+    table_w_ = std::max(120, x() + card_w_rel - 10 - table_x_);
 
     nav_back_x_ = x() + 4;
     nav_forward_x_ = x() + 36;
@@ -283,10 +294,15 @@ void FileBrowserPanel::layout_geometry()
     export_w_ = 22 + modern::text_width("Export", 11) + 20;
     new_folder_w_ = 22 + modern::text_width("New folder", 11) + 20;
     delete_w_ = 22 + modern::text_width("Delete", 11) + 20;
-    import_x_ = x() + 4;
-    export_x_ = import_x_ + import_w_ + 4;
-    new_folder_x_ = export_x_ + export_w_ + 4;
+    copy_w_ = 22 + modern::text_width("To host", 11) + 20;
+    new_folder_x_ = x() + 4;
     delete_x_ = new_folder_x_ + new_folder_w_ + 4;
+    copy_x_ = delete_x_ + delete_w_ + 4;
+    import_w_ = 0;
+    export_w_ = 0;
+    import_x_ = x() + 4;
+    export_x_ = import_x_;
+    (void) action_y;
     (void) action_y;
     (void) action_h;
 }
@@ -294,6 +310,11 @@ void FileBrowserPanel::layout_geometry()
 void FileBrowserPanel::layout_search()
 {
     if (search_ == nullptr) {
+        return;
+    }
+    if (!show_preview_) {
+        const int field_w = std::min(220, std::max(140, w() / 3));
+        search_->resize(x() + w() - field_w - 8, y() + 7, field_w, 26);
         return;
     }
     const int field_w = std::max(140, preview_w_ - 40);
@@ -618,6 +639,11 @@ void FileBrowserPanel::update_preview()
     preview_message_.clear();
     preview_kind_ = 0;
     multi_count_ = selection_.size();
+    if (!show_preview_) {
+        /* The dual layout has no preview card; do not read file contents. */
+        preview_action_w_ = 0;
+        return;
+    }
     if (!target_valid_) {
         preview_message_ = "Select a ZealFS v2 partition to browse its files.";
         return;
@@ -795,8 +821,9 @@ void FileBrowserPanel::open_row(int row)
     const int entry_index = order_[row];
     if (entries_[entry_index].directory) {
         navigate_to(entry_path(entry_index), true);
-    } else {
-        export_entry(entry_index);
+    } else if (owner_ != nullptr) {
+        /* Double-click copies to the host pane's current folder. */
+        owner_->copy_disk_to_host();
     }
 }
 
@@ -860,6 +887,26 @@ void FileBrowserPanel::clear_search()
     search_->value("");
     rebuild_order();
     select_row(order_.empty() ? -1 : 0, false);
+    redraw();
+}
+
+void FileBrowserPanel::set_show_preview(bool show)
+{
+    if (show_preview_ == show) {
+        return;
+    }
+    show_preview_ = show;
+    layout_geometry();
+    layout_search();
+    redraw();
+}
+
+void FileBrowserPanel::set_transfer_hint(bool active)
+{
+    if (transfer_hint_ == active) {
+        return;
+    }
+    transfer_hint_ = active;
     redraw();
 }
 
@@ -1033,6 +1080,44 @@ void FileBrowserPanel::delete_entry(int entry_index)
     }
 }
 
+bool FileBrowserPanel::export_to_directory(const std::string &directory)
+{
+    if (!valid_target() || selection_.empty()) {
+        return false;
+    }
+    int failed = 0;
+    {
+        /* The progress window is destroyed before the list refreshes, so the
+         * repaint covers the area it occupied. */
+        ProgressDialog progress("Copying to this computer", "");
+        for (int entry_index : selection_) {
+            const zfs_entry &entry = entries_[entry_index];
+            progress.set_detail(entry.name);
+            if (disk_fs_export(disk_,
+                               slot_,
+                               entry_path(entry_index).c_str(),
+                               host_join(directory, entry.name).c_str(),
+                               progress_cb,
+                               &progress) != 0) {
+                ++failed;
+            }
+        }
+    }
+    if (failed == 0) {
+        owner_->set_status("Copied to this computer");
+    } else {
+        const std::string message = std::to_string(failed) + " of " + std::to_string(selection_.size()) +
+                                    " copies failed; see the status bar";
+        owner_->set_status(message.c_str());
+    }
+    return failed == 0;
+}
+
+bool FileBrowserPanel::export_selection_to_host(const std::string &directory)
+{
+    return export_to_directory(directory);
+}
+
 void FileBrowserPanel::export_selection()
 {
     if (!valid_target() || selection_.empty()) {
@@ -1048,32 +1133,7 @@ void FileBrowserPanel::export_selection()
     if (chooser.show() != 0) {
         return;
     }
-    const std::string directory = chooser.filename();
-    int failed = 0;
-    {
-        /* The progress window is destroyed before the list refreshes, so the
-         * repaint covers the area it occupied. */
-        ProgressDialog progress("Exporting selection", "");
-        for (int entry_index : selection_) {
-            const zfs_entry &entry = entries_[entry_index];
-            progress.set_detail(entry.name);
-            if (disk_fs_export(disk_,
-                               slot_,
-                               entry_path(entry_index).c_str(),
-                               host_join(directory, entry.name).c_str(),
-                               progress_cb,
-                               &progress) != 0) {
-                ++failed;
-            }
-        }
-    }
-    if (failed == 0) {
-        owner_->set_status("Selection exported");
-    } else {
-        const std::string message = std::to_string(failed) + " of " + std::to_string(selection_.size()) +
-                                    " exports failed; see the status bar";
-        owner_->set_status(message.c_str());
-    }
+    export_to_directory(chooser.filename());
 }
 
 void FileBrowserPanel::delete_selection()
@@ -1266,17 +1326,14 @@ FileBrowserPanel::Hit FileBrowserPanel::hit_test(int mx, int my) const
 
     const int action_y = y() + nav_h_ + 4;
     if (my >= action_y && my <= action_y + 28) {
-        if (mx >= import_x_ && mx < import_x_ + import_w_) {
-            return {HitKind::Import, -1};
-        }
-        if (mx >= export_x_ && mx < export_x_ + export_w_) {
-            return {HitKind::Export, -1};
-        }
         if (mx >= new_folder_x_ && mx < new_folder_x_ + new_folder_w_) {
             return {HitKind::NewFolder, -1};
         }
         if (mx >= delete_x_ && mx < delete_x_ + delete_w_) {
             return {HitKind::Delete, -1};
+        }
+        if (mx >= copy_x_ && mx < copy_x_ + copy_w_) {
+            return {HitKind::CopyToHost, -1};
         }
     }
 
@@ -1307,7 +1364,7 @@ FileBrowserPanel::Hit FileBrowserPanel::hit_test(int mx, int my) const
             return {HitKind::TableRow, row};
         }
     }
-    if (mx >= x() + 4 && mx < table_x_ - 8 && my >= body_top + 4) {
+    if (show_tree_ && mx >= x() + 4 && mx < table_x_ - 8 && my >= body_top + 4) {
         const int row = (my - body_top - 4 + tree_scroll_) / kTreeRowHeight;
         if (row >= 0 && row < (int) tree_rows_.size()) {
             return {HitKind::TreeRow, row};
@@ -1399,6 +1456,9 @@ int FileBrowserPanel::handle(int event)
 {
     switch (event) {
     case FL_PUSH: {
+        if (search_ != nullptr && point_inside(search_, Fl::event_x(), Fl::event_y())) {
+            return search_->handle(event);
+        }
         /* Focus the list itself, not the search field, when clicking entries. */
         Fl::focus(this);
         if (Fl::event_button() != FL_LEFT_MOUSE) {
@@ -1435,6 +1495,11 @@ int FileBrowserPanel::handle(int event)
         case HitKind::Delete:
             delete_selection();
             return 1;
+        case HitKind::CopyToHost:
+            if (owner_ != nullptr) {
+                owner_->copy_disk_to_host();
+            }
+            return 1;
         case HitKind::TableHeader:
             if (hit.index == sort_column_) {
                 descending_ = !descending_;
@@ -1456,6 +1521,11 @@ int FileBrowserPanel::handle(int event)
                 } else {
                     select_row(hit.index, false);
                 }
+                drag_candidate_ = true;
+                dragging_ = false;
+                drag_x_ = Fl::event_x_root();
+                drag_y_ = Fl::event_y_root();
+                Fl::pushed(this);
                 if (Fl::event_clicks() > 0) {
                     open_row(hit.index);
                 }
@@ -1513,6 +1583,18 @@ int FileBrowserPanel::handle(int event)
         return 1;
     }
     case FL_DRAG: {
+        if (drag_candidate_ && !table_scroll_drag_) {
+            const int dx = std::abs(Fl::event_x_root() - drag_x_);
+            const int dy = std::abs(Fl::event_y_root() - drag_y_);
+            if (!dragging_ && (dx > 4 || dy > 4)) {
+                dragging_ = true;
+            }
+            if (dragging_ && owner_ != nullptr && owner_->host_browser() != nullptr) {
+                const bool over_host = point_inside(owner_->host_browser(), Fl::event_x(), Fl::event_y());
+                owner_->host_browser()->set_transfer_hint(over_host);
+                return 1;
+            }
+        }
         if (table_scroll_drag_) {
             const int list_top = body_y_ + kTableHeader;
             const int list_height = std::max(1, y() + h() - 4 - list_top - 2);
@@ -1532,7 +1614,23 @@ int FileBrowserPanel::handle(int event)
         if (table_scroll_drag_) {
             table_scroll_drag_ = false;
             Fl::pushed(nullptr);
+            return 1;
         }
+        if (dragging_) {
+            const bool over_host = owner_ != nullptr && owner_->host_browser() != nullptr &&
+                                   point_inside(owner_->host_browser(), Fl::event_x(), Fl::event_y());
+            if (owner_ != nullptr && owner_->host_browser() != nullptr) {
+                owner_->host_browser()->set_transfer_hint(false);
+            }
+            if (over_host) {
+                owner_->copy_disk_to_host();
+            }
+            dragging_ = false;
+            drag_candidate_ = false;
+            Fl::pushed(nullptr);
+            return 1;
+        }
+        drag_candidate_ = false;
         return 1;
     case FL_MOVE: {
         const Hit hit = hit_test(Fl::event_x(), Fl::event_y());
@@ -1555,7 +1653,9 @@ int FileBrowserPanel::handle(int event)
         tip_index_ = -1;
         return 1;
     case FL_MOUSEWHEEL: {
-        const int amount = -Fl::event_dy() * 42;
+        /* FLTK reports +1 for a wheel-down notch, matching its scrollbars:
+         * move the view down (increase the offset) on wheel down. */
+        const int amount = Fl::event_dy() * 42;
         if (Fl::event_x() < table_x_) {
             scroll_tree(amount);
         } else if (Fl::event_x() >= table_x_ && Fl::event_x() <= preview_x_) {

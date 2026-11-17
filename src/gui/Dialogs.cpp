@@ -38,8 +38,8 @@ constexpr uint64_t kMinPartitionBytes = 8 * KB;
 static void style_field(Fl_Widget *widget)
 {
     widget->box(modern::field_box());
-    widget->color(modern::color(modern::kPanel));
-    widget->selection_color(modern::color(modern::kAccentSoft));
+    widget->color(modern::color(modern::Palette::kPanel));
+    widget->selection_color(modern::color(modern::Palette::kAccentSoft));
 }
 
 static void style_choice(Fl_Choice *choice)
@@ -47,7 +47,7 @@ static void style_choice(Fl_Choice *choice)
     style_field(choice);
     choice->textsize(12);
     choice->textfont(FL_HELVETICA);
-    choice->textcolor(modern::color(modern::kDark));
+    choice->textcolor(modern::color(modern::Palette::kDark));
 }
 
 static void style_input(Fl_Input *input)
@@ -55,8 +55,8 @@ static void style_input(Fl_Input *input)
     style_field(input);
     input->textsize(12);
     input->textfont(FL_HELVETICA);
-    input->textcolor(modern::color(modern::kDark));
-    input->cursor_color(modern::color(modern::kAccent));
+    input->textcolor(modern::color(modern::Palette::kDark));
+    input->cursor_color(modern::color(modern::Palette::kAccent));
 }
 
 static void style_value_input(Fl_Value_Input *input)
@@ -64,8 +64,8 @@ static void style_value_input(Fl_Value_Input *input)
     style_field(input);
     input->input.textsize(12);
     input->input.textfont(FL_HELVETICA);
-    input->input.textcolor(modern::color(modern::kDark));
-    input->input.cursor_color(modern::color(modern::kAccent));
+    input->input.textcolor(modern::color(modern::Palette::kDark));
+    input->input.cursor_color(modern::color(modern::Palette::kAccent));
 }
 
 static void center_on(Fl_Window *dialog, Fl_Window *owner)
@@ -91,12 +91,12 @@ public:
         : Fl_Window(440, 360, "Create a new partition"), owner_(owner), disk_(owner->current_disk())
     {
         set_modal();
-        color(modern::color(modern::kWindow));
+        color(modern::color(modern::Palette::kWindow));
 
         info_ = new Fl_Box(FL_NO_BOX, 20, 14, 400, 40, "");
         info_->align(FL_ALIGN_LEFT | FL_ALIGN_TOP | FL_ALIGN_INSIDE | FL_ALIGN_CLIP);
         info_->labelsize(11);
-        info_->labelcolor(modern::color(modern::kGray));
+        info_->labelcolor(modern::color(modern::Palette::kGray));
 
         Fl_Box *type_caption = make_caption("Type", 64);
         type_ = new Fl_Choice(120, 64, 180, 24);
@@ -122,8 +122,8 @@ public:
         slider_->type(FL_HOR_NICE_SLIDER);
         slider_->callback(slider_cb, this);
         slider_->when(FL_WHEN_CHANGED | FL_WHEN_RELEASE);
-        slider_->color(modern::color(modern::kPanelAlt));
-        slider_->selection_color(modern::color(modern::kAccent));
+        slider_->color(modern::color(modern::Palette::kPanelAlt));
+        slider_->selection_color(modern::color(modern::Palette::kAccent));
 
         make_caption("Alignment", 162);
         alignment_ = new Fl_Choice(120, 162, 160, 24);
@@ -136,21 +136,21 @@ public:
         make_caption("Address", 196);
         address_ = new Fl_Output(120, 196, 160, 24);
         style_field(address_);
-        address_->color(modern::color(modern::kPanelAlt));
+        address_->color(modern::color(modern::Palette::kPanelAlt));
         address_->textsize(12);
         address_->textfont(FL_HELVETICA);
-        address_->textcolor(modern::color(modern::kDark2));
+        address_->textcolor(modern::color(modern::Palette::kDark2));
 
         message_ = new Fl_Box(FL_NO_BOX, 20, 228, 400, 32, "");
         message_->align(FL_ALIGN_LEFT | FL_ALIGN_TOP | FL_ALIGN_INSIDE | FL_ALIGN_CLIP);
         message_->labelsize(11);
-        message_->labelcolor(modern::color(modern::kWarning));
+        message_->labelcolor(modern::color(modern::Palette::kWarning));
 
         Fl_Box *note =
             new Fl_Box(FL_NO_BOX, 20, 282, 400, 18, "The partition is created when the changes are applied.");
         note->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE | FL_ALIGN_CLIP);
         note->labelsize(11);
-        note->labelcolor(modern::color(modern::kGray));
+        note->labelcolor(modern::color(modern::Palette::kGray));
 
         create_ = new modern::ModernButton(230, 310, 90, 30, "Create", true);
         create_->callback(create_cb, this);
@@ -181,7 +181,7 @@ private:
         auto *caption = new Fl_Box(FL_NO_BOX, 20, y, 90, 24, label);
         caption->align(FL_ALIGN_RIGHT | FL_ALIGN_INSIDE);
         caption->labelsize(12);
-        caption->labelcolor(modern::color(modern::kDark));
+        caption->labelcolor(modern::color(modern::Palette::kDark));
         return caption;
     }
 
@@ -366,7 +366,7 @@ public:
     explicit NewImageDialog(MainWindow *owner) : Fl_Window(480, 330, "Create a disk image"), owner_(owner)
     {
         set_modal();
-        color(modern::color(modern::kWindow));
+        color(modern::color(modern::Palette::kWindow));
 
         Fl_Box *location_caption = caption("Location", 24);
         (void) location_caption;
@@ -398,13 +398,13 @@ public:
         hint_ = new Fl_Box(FL_NO_BOX, 20, 138, 440, 84, "");
         hint_->align(FL_ALIGN_LEFT | FL_ALIGN_TOP | FL_ALIGN_INSIDE | FL_ALIGN_CLIP);
         hint_->labelsize(11);
-        hint_->labelcolor(modern::color(modern::kGray));
+        hint_->labelcolor(modern::color(modern::Palette::kGray));
 
         Fl_Box *note =
             new Fl_Box(FL_NO_BOX, 20, 238, 440, 18, "The image file is created when the changes are applied.");
         note->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE | FL_ALIGN_CLIP);
         note->labelsize(11);
-        note->labelcolor(modern::color(modern::kGray));
+        note->labelcolor(modern::color(modern::Palette::kGray));
 
         create_ = new modern::ModernButton(270, 280, 90, 30, "Create", true);
         create_->callback(create_cb, this);
@@ -433,7 +433,7 @@ private:
         auto *box = new Fl_Box(FL_NO_BOX, 20, y, 84, 24, text);
         box->align(FL_ALIGN_RIGHT | FL_ALIGN_INSIDE);
         box->labelsize(12);
-        box->labelcolor(modern::color(modern::kDark));
+        box->labelcolor(modern::color(modern::Palette::kDark));
         return box;
     }
 
@@ -517,9 +517,9 @@ public:
     explicit AboutDialog(MainWindow *owner) : Fl_Window(560, 392, "About Zeal Disk Tool")
     {
         set_modal();
-        color(modern::color(modern::kWindow));
+        color(modern::color(modern::Palette::kWindow));
         begin();
-        close_ = new modern::ModernButton(0, 0, 10, 10, "Close", true, modern::color(modern::kZealPurple));
+        close_ = new modern::ModernButton(0, 0, 10, 10, "Close", true, modern::color(modern::Palette::kZealPurple));
         close_->callback(close_cb, this);
         end();
         close_->resize(w() - 24 - 120, h() - 24 - 36, 120, 36);
@@ -530,7 +530,7 @@ public:
     void draw() override
     {
         const int pad = 26;
-        fl_color(modern::color(modern::kWindow));
+        fl_color(modern::color(modern::Palette::kWindow));
         fl_rectf(0, 0, w(), h());
 
         /* The 256 px source keeps the icon crisp at this size. Scale the image
@@ -560,17 +560,17 @@ public:
         modern::text(std::string("Version ") + VERSION,
                      pad + 112,
                      pad + 56,
-                     modern::color(modern::kGray),
+                     modern::color(modern::Palette::kGray),
                      11,
                      false);
         modern::text("ZealFS v2 disk and image manager",
                      pad + 112,
                      pad + 76,
-                     modern::color(modern::kGray2),
+                     modern::color(modern::Palette::kGray2),
                      11,
                      false);
 
-        fl_color(modern::color(modern::kDividerSoft));
+        fl_color(modern::color(modern::Palette::kDividerSoft));
         fl_line(pad, pad + 106, w() - pad, pad + 106);
 
         modern::text_clipped("Create, inspect and update ZealFS v2 disk images and physical "
@@ -580,7 +580,7 @@ public:
                              pad + 122,
                              w() - 2 * pad,
                              54,
-                             modern::color(modern::kDark2),
+                             modern::color(modern::Palette::kDark2),
                              11,
                              false,
                              FL_ALIGN_LEFT | FL_ALIGN_TOP | FL_ALIGN_WRAP);
@@ -593,29 +593,29 @@ public:
         };
         int y = pad + 192;
         for (const char *bullet : bullets) {
-            modern::fill_circle(pad + 3, y - 4, 2, modern::color(modern::kZealPurple));
-            modern::text(bullet, pad + 14, y, modern::color(modern::kDark2), 11, false);
+            modern::fill_circle(pad + 3, y - 4, 2, modern::color(modern::Palette::kZealPurple));
+            modern::text(bullet, pad + 14, y, modern::color(modern::Palette::kDark2), 11, false);
             y += 22;
         }
 
-        fl_color(modern::color(modern::kDividerSoft));
+        fl_color(modern::color(modern::Palette::kDividerSoft));
         fl_line(pad, h() - 92, w() - pad, h() - 92);
         modern::text("Linux  \xC2\xB7  macOS  \xC2\xB7  Windows",
                      pad,
                      h() - 70,
-                     modern::color(modern::kGray),
+                     modern::color(modern::Palette::kGray),
                      10,
                      false);
         modern::text("Apache-2.0  \xC2\xB7  Icons by Lucide (ISC)  \xC2\xB7  Built with FLTK",
                      pad,
                      h() - 52,
-                     modern::color(modern::kGray2),
+                     modern::color(modern::Palette::kGray2),
                      10,
                      false);
         modern::text("zeal8bit.com  \xC2\xB7  contact@zeal8bit.com",
                      pad,
                      h() - 34,
-                     modern::color(modern::kGray2),
+                     modern::color(modern::Palette::kGray2),
                      10,
                      false);
 

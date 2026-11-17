@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "gui/MainWindow.hpp"
+#include "gui/Theme.hpp"
 #include "app_icon.h"
 
 #ifdef _WIN32
@@ -74,7 +75,9 @@ int main(int argc, char *argv[])
     }
 
     Fl::scheme("gtk+");
-    Fl::set_color(FL_BACKGROUND_COLOR, 0xef, 0xf2, 0xf6);
+    /* Resolves the light/dark palette and rewrites FLTK's global colours before
+     * any widget is created; the choice is remembered across runs. */
+    modern::load_theme();
     /* A stable X11/Wayland application id lets desktop shells associate the
      * window icon with the zeal-disk-tool desktop entry. */
     Fl_Window::default_xclass("zeal-disk-tool");

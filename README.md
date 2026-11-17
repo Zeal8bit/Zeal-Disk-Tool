@@ -13,7 +13,7 @@ The project supports macOS, Linux (including Raspberry Pi) and Windows. See [sup
 | Guide | Topics |
 | --- | --- |
 | [CLI](docs/CLI.md) | Commands, options, interactive shell and history, recursive export, merge/restore, automation |
-| [GUI](docs/GUI.md) | Single-window disk sidebar, partition map and details, embedded file browser, Apply and Cancel |
+| [GUI](docs/GUI.md) | Files and Manage views, partition map and details, dual-pane host/disk file browser with copy, Apply and Cancel |
 | [ZealFS concepts](docs/ZEALFS.md) | MBR versus raw layouts, partition numbering, names, paths, allocation and capacity limits |
 | [Working with disks](docs/DISKS.md) | Shared staging behavior, image/device writes, imports/exports versus backups, permissions and discovery troubleshooting |
 | [Build and installation](docs/BUILD.md) | Supported platforms, CMake, FLTK, cross-compilation, packages and tests |

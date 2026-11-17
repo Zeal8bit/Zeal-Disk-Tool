@@ -59,23 +59,23 @@ public:
         const bool pressed = enabled && value() != 0;
         const bool hovered = enabled && Fl::belowmouse() == this;
 
-        Fl_Color fill = modern::color(modern::kPanel);
+        Fl_Color fill = modern::color(modern::Palette::kPanel);
         if (!enabled) {
-            fill = modern::color(0xf3f5f8);
+            fill = modern::color(modern::Palette::kRowAlt);
         } else if (pressed) {
-            fill = modern::color(modern::kPressed);
+            fill = modern::color(modern::Palette::kPressed);
         } else if (hovered) {
-            fill = modern::color(modern::kHover);
+            fill = modern::color(modern::Palette::kHover);
         }
-        const Fl_Color edge = modern::color(enabled ? (unsigned) modern::kButtonEdge
-                                                    : (unsigned) modern::kDividerSoft);
-        const Fl_Color foreground = modern::color(enabled ? (unsigned) modern::kDark2
-                                                          : 0xb3bcc8u);
+        const Fl_Color edge = modern::color(enabled ? modern::Palette::kButtonEdge
+                                                    : modern::Palette::kDividerSoft);
+        const Fl_Color foreground = modern::color(enabled ? modern::Palette::kDark2
+                                                          : modern::Palette::kTextDisabled);
 
         modern::fill_round(x(), y(), w(), h(), 8, fill);
         modern::stroke_round(x(), y(), w(), h(), 8, edge, 1);
         if (Fl::focus() == this) {
-            modern::stroke_round(x() + 1, y() + 1, w() - 2, h() - 2, 7, modern::color(modern::kAccent), 1);
+            modern::stroke_round(x() + 1, y() + 1, w() - 2, h() - 2, 7, modern::color(modern::Palette::kAccent), 1);
         }
         modern::draw_glyph(action_glyph(action_), x() + 22, y() + h() / 2, 18, foreground);
         modern::text(label(), x() + 42, y() + h() / 2 + 5, foreground, 12, false);
@@ -212,8 +212,8 @@ void DetailsPanel::draw()
     const int card_h = h();
 
     /* Partition card */
-    modern::fill_round(x(), y(), card_w, card_h, 10, modern::color(modern::kPanel));
-    modern::stroke_round(x(), y(), card_w, card_h, 10, modern::color(modern::kDivider), 1);
+    modern::fill_round(x(), y(), card_w, card_h, 10, modern::color(modern::Palette::kPanel));
+    modern::stroke_round(x(), y(), card_w, card_h, 10, modern::color(modern::Palette::kDivider), 1);
 
     const bool valid = disk_ != nullptr && slot_ >= 0 && slot_ < MAX_PART_COUNT &&
                        disk_->partitions[slot_].active;
@@ -224,21 +224,21 @@ void DetailsPanel::draw()
             modern::text("No disk selected",
                          x() + 24,
                          y() + 42,
-                         modern::color(modern::kDark),
+                         modern::color(modern::Palette::kDark),
                          15,
                          true);
             modern::text("Open an image from the File menu.",
                          x() + 24,
                          y() + 64,
-                         modern::color(modern::kGray),
+                         modern::color(modern::Palette::kGray),
                          11,
                          false);
             info_top = y() + 92;
         } else {
             /* Disk overview: shown when the disk header is selected instead of
              * one of its partitions. */
-            modern::draw_drive(x() + 22, y() + 16, 40, 40, modern::color(modern::kDark2));
-            modern::text("Disk overview", x() + 80, y() + 37, modern::color(modern::kDark), 15, true);
+            modern::draw_drive(x() + 22, y() + 16, 40, 40, modern::color(modern::Palette::kDark2));
+            modern::text("Disk overview", x() + 80, y() + 37, modern::color(modern::Palette::kDark), 15, true);
             int used_slots = 0;
             for (int index = 0; index < MAX_PART_COUNT; ++index) {
                 if (disk_->partitions[index].active) {
@@ -258,10 +258,10 @@ void DetailsPanel::draw()
                                  y() + 57,
                                  card_w - 104,
                                  16,
-                                 modern::color(modern::kGray),
+                                 modern::color(modern::Palette::kGray),
                                  11,
                                  false);
-            fl_color(modern::color(modern::kDividerSoft));
+            fl_color(modern::color(modern::Palette::kDividerSoft));
             fl_line(x() + 20, y() + 78, x() + card_w - 20, y() + 78);
 
             int row_y = y() + 92;
@@ -269,7 +269,7 @@ void DetailsPanel::draw()
                 modern::text("No partitions yet. Use + to create one.",
                              x() + 24,
                              row_y + 15,
-                             modern::color(modern::kGray),
+                             modern::color(modern::Palette::kGray),
                              11,
                              false);
             }
@@ -279,16 +279,16 @@ void DetailsPanel::draw()
                     continue;
                 }
                 if (overview_hover_ == index) {
-                    modern::fill_round(x() + 12, row_y - 2, card_w - 24, 22, 6, modern::color(modern::kHover));
+                    modern::fill_round(x() + 12, row_y - 2, card_w - 24, 22, 6, modern::color(modern::Palette::kHover));
                 }
                 modern::fill_round(x() + 24, row_y + 4, 10, 10, 3, modern::slot_color(index));
                 char title[32];
                 std::snprintf(title, sizeof(title), "Partition %d", index);
-                modern::text(title, x() + 44, row_y + 15, modern::color(modern::kDark2), 11, true);
+                modern::text(title, x() + 44, row_y + 15, modern::color(modern::Palette::kDark2), 11, true);
                 modern::text(disk_get_fs_type(part.type),
                              x() + 160,
                              row_y + 15,
-                             modern::color(modern::kGray),
+                             modern::color(modern::Palette::kGray),
                              11,
                              false);
                 modern::text_clipped(utils::format_size((uint64_t) part.size_sectors * DISK_SECTOR_SIZE),
@@ -296,7 +296,7 @@ void DetailsPanel::draw()
                                      row_y + 3,
                                      card_w - 274,
                                      16,
-                                     modern::color(modern::kGray),
+                                     modern::color(modern::Palette::kGray),
                                      11,
                                      false,
                                      FL_ALIGN_RIGHT | FL_ALIGN_CLIP);
@@ -312,7 +312,7 @@ void DetailsPanel::draw()
 
         char title[48];
         std::snprintf(title, sizeof(title), "Partition %d", slot_);
-        modern::text(title, x() + 80, y() + 37, modern::color(modern::kDark), 15, true);
+        modern::text(title, x() + 80, y() + 37, modern::color(modern::Palette::kDark), 15, true);
         const std::string subtitle =
             std::string(disk_get_fs_type(part.type)) + "  \xC2\xB7  " +
             utils::format_size((uint64_t) part.size_sectors * DISK_SECTOR_SIZE);
@@ -321,10 +321,10 @@ void DetailsPanel::draw()
                              y() + 57,
                              card_w - 104,
                              16,
-                             modern::color(modern::kGray),
+                             modern::color(modern::Palette::kGray),
                              11,
                              false);
-        fl_color(modern::color(modern::kDividerSoft));
+        fl_color(modern::color(modern::Palette::kDividerSoft));
         fl_line(x() + 20, y() + 78, x() + card_w - 20, y() + 78);
     }
 
@@ -362,18 +362,18 @@ void DetailsPanel::draw()
         std::snprintf(type_value, sizeof(type_value), "0x%02X", (unsigned) part.type);
         const char *state = disk_->has_staged_changes ? "Staged changes" : "Written to disk";
         const Fl_Color state_color =
-            disk_->has_staged_changes ? modern::color(modern::kWarning) : modern::color(modern::kSuccess);
+            disk_->has_staged_changes ? modern::color(modern::Palette::kWarning) : modern::color(modern::Palette::kSuccess);
 
         Pair left[] = {
-            {"File system:", disk_get_fs_type(part.type), modern::color(modern::kDark2)},
-            {"Total size:", utils::format_size(size_bytes), modern::color(modern::kDark2)},
-            {"Used:", used_value, modern::color(modern::kDark2)},
-            {"Available:", available_value, modern::color(modern::kDark2)},
+            {"File system:", disk_get_fs_type(part.type), modern::color(modern::Palette::kDark2)},
+            {"Total size:", utils::format_size(size_bytes), modern::color(modern::Palette::kDark2)},
+            {"Used:", used_value, modern::color(modern::Palette::kDark2)},
+            {"Available:", available_value, modern::color(modern::Palette::kDark2)},
         };
         Pair right[] = {
-            {"Start address:", start_value, modern::color(modern::kDark2)},
-            {"Partition slot:", std::to_string(slot_), modern::color(modern::kDark2)},
-            {"Type byte:", type_value, modern::color(modern::kDark2)},
+            {"Start address:", start_value, modern::color(modern::Palette::kDark2)},
+            {"Partition slot:", std::to_string(slot_), modern::color(modern::Palette::kDark2)},
+            {"Type byte:", type_value, modern::color(modern::Palette::kDark2)},
             {"Status:", state, state_color},
         };
 
@@ -384,7 +384,7 @@ void DetailsPanel::draw()
         const int val2_x = col2_x + 108;
         for (int row = 0; row < 4; ++row) {
             const int by = info_top + 8 + row * row_h;
-            modern::text(left[row].label, col1_x, by, modern::color(modern::kGray), 11, false);
+            modern::text(left[row].label, col1_x, by, modern::color(modern::Palette::kGray), 11, false);
             modern::text_clipped(left[row].value,
                                  val1_x,
                                  by - 12,
@@ -393,7 +393,7 @@ void DetailsPanel::draw()
                                  left[row].color,
                                  11,
                                  false);
-            modern::text(right[row].label, col2_x, by, modern::color(modern::kGray), 11, false);
+            modern::text(right[row].label, col2_x, by, modern::color(modern::Palette::kGray), 11, false);
             modern::text_clipped(right[row].value,
                                  val2_x,
                                  by - 12,

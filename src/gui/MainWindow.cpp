@@ -22,6 +22,7 @@
 #include "gui/Dialogs.hpp"
 #include "gui/DiskMapPanel.hpp"
 #include "gui/FileBrowserPanel.hpp"
+#include "gui/HostBrowserPanel.hpp"
 #include "gui/ModernStyle.hpp"
 #include "gui/SidebarPanel.hpp"
 #include "gui/Utils.hpp"
@@ -36,9 +37,9 @@ static void draw_round_selection(int x, int y, int w, int h, Fl_Color color)
 
 static void draw_menu_panel(int x, int y, int w, int h, Fl_Color)
 {
-    fl_color(FL_WHITE);
+    fl_color(modern::color(modern::Palette::kPanel));
     fl_rectf(x, y, w, h);
-    fl_color(modern::color(modern::kDivider));
+    fl_color(modern::color(modern::Palette::kDivider));
     fl_rect(x, y, w, h);
 }
 
@@ -86,23 +87,25 @@ MainWindow::MainWindow(const std::vector<std::string> &images)
     : Fl_Double_Window(1440, 900, "Zeal Disk Tool"), image_paths_(images)
 {
     box(FL_NO_BOX);
-    color(modern::color(modern::kWindow));
+    color(modern::color(modern::Palette::kWindow));
 
     begin();
     menu_ = new ModernMenuBar(0, 0, w(), 26);
     menu_->box(FL_FLAT_BOX);
-    menu_->color(modern::color(modern::kTitleBg));
-    menu_->textcolor(modern::color(modern::kDark2));
+    menu_->color(modern::color(modern::Palette::kTitleBg));
+    menu_->textcolor(modern::color(modern::Palette::kDark2));
     menu_->textsize(12);
     menu_->menu_box(menu_panel_box());
     menu_->down_box(menu_selection_box());
-    menu_->selection_color(modern::color(modern::kSelection));
+    menu_->selection_color(modern::color(modern::Palette::kSelection));
     Fl::menu_linespacing(8);
     build_menu();
     sidebar_ = new SidebarPanel(0, 0, 10, 10);
     map_ = new DiskMapPanel(0, 0, 10, 10);
     details_ = new DetailsPanel(0, 0, 10, 10);
+    host_ = new HostBrowserPanel(0, 0, 10, 10, this);
     files_ = new FileBrowserPanel(0, 0, 10, 10, this);
+    files_->set_show_preview(false);
     apply_button_ = new modern::ModernButton(0, 0, 110, 18, "Apply changes", true);
     apply_button_->callback(apply_cb, this);
     apply_button_->tooltip("Write all pending changes (Ctrl+S)");
@@ -166,8 +169,17 @@ void MainWindow::build_menu()
     menu_->add("&Edit/&Focus File List", FL_COMMAND + 'b', menu_cb, data(MenuAction::FocusBrowser));
     menu_->add("&Edit/F&ind...", FL_COMMAND + 'f', menu_cb, data(MenuAction::FocusSearch));
 
+    menu_->add("&View/&Files", FL_COMMAND + '1', menu_cb, data(MenuAction::ViewFiles));
+    menu_->add("&View/&Manage", FL_COMMAND + '2', menu_cb, data(MenuAction::ViewManage));
+    menu_->add("&View/A&ppearance/Follow &System", 0, menu_cb, data(MenuAction::AppearanceSystem),
+               FL_MENU_RADIO | FL_MENU_DIVIDER);
+    menu_->add("&View/A&ppearance/&Light", 0, menu_cb, data(MenuAction::AppearanceLight), FL_MENU_RADIO);
+    menu_->add("&View/A&ppearance/&Dark", 0, menu_cb, data(MenuAction::AppearanceDark), FL_MENU_RADIO);
+
     menu_->add("&Help/&Keyboard Shortcuts", 0, menu_cb, data(MenuAction::Shortcuts));
     menu_->add("&Help/&About Zeal Disk Tool", 0, menu_cb, data(MenuAction::About));
+
+    sync_appearance_menu();
 }
 
 void MainWindow::perform_menu_action(MenuAction action)
@@ -209,22 +221,43 @@ void MainWindow::perform_menu_action(MenuAction action)
         show_properties();
         break;
     case MenuAction::ImportFiles:
+        set_view(View::Files);
         files_->action_import();
         break;
     case MenuAction::ExportSelection:
+        set_view(View::Files);
         files_->action_export();
         break;
     case MenuAction::NewFolder:
+        set_view(View::Files);
         files_->action_new_folder();
         break;
     case MenuAction::DeleteEntry:
+        set_view(View::Files);
         files_->action_delete();
         break;
     case MenuAction::FocusBrowser:
+        set_view(View::Files);
         files_->focus_list();
         break;
     case MenuAction::FocusSearch:
+        set_view(View::Files);
         files_->focus_search();
+        break;
+    case MenuAction::ViewFiles:
+        set_view(View::Files);
+        break;
+    case MenuAction::ViewManage:
+        set_view(View::Manage);
+        break;
+    case MenuAction::AppearanceSystem:
+        set_appearance(modern::Theme::System);
+        break;
+    case MenuAction::AppearanceLight:
+        set_appearance(modern::Theme::Light);
+        break;
+    case MenuAction::AppearanceDark:
+        set_appearance(modern::Theme::Dark);
         break;
     case MenuAction::Shortcuts:
         show_shortcuts();
@@ -250,6 +283,69 @@ void MainWindow::set_menu_enabled(const char *path, bool enabled)
     }
     const int divider = menu_->mode(index) & FL_MENU_DIVIDER;
     menu_->mode(index, divider | (enabled ? 0 : FL_MENU_INACTIVE));
+}
+
+void MainWindow::sync_appearance_menu()
+{
+    if (menu_ == nullptr) {
+        return;
+    }
+    struct Entry {
+        const char *path;
+        modern::Theme value;
+    };
+    const Entry entries[] = {
+        {"&View/A&ppearance/Follow &System", modern::Theme::System},
+        {"&View/A&ppearance/&Light", modern::Theme::Light},
+        {"&View/A&ppearance/&Dark", modern::Theme::Dark},
+    };
+    const modern::Theme preference = modern::theme_preference();
+    for (const Entry &entry : entries) {
+        const Fl_Menu_Item *item = menu_->find_item(entry.path);
+        if (item == nullptr) {
+            continue;
+        }
+        const int index = (int) (item - menu_->menu());
+        if (index < 0 || index >= menu_->size()) {
+            continue;
+        }
+        /* mode() replaces the whole flag word, so the radio bit has to be
+         * carried over instead of only setting FL_MENU_VALUE. */
+        menu_->mode(index, FL_MENU_RADIO | (entry.value == preference ? FL_MENU_VALUE : 0));
+    }
+}
+
+void MainWindow::apply_theme()
+{
+    /* Everything the panels draw reads the palette through modern::color() at
+     * draw time; only the colours set on widgets once, at construction, have to
+     * be re-applied here. */
+    color(modern::color(modern::Palette::kWindow));
+    if (menu_ != nullptr) {
+        menu_->color(modern::color(modern::Palette::kTitleBg));
+        menu_->textcolor(modern::color(modern::Palette::kDark2));
+        menu_->selection_color(modern::color(modern::Palette::kSelection));
+        menu_->redraw();
+    }
+    redraw();
+}
+
+void MainWindow::set_appearance(modern::Theme preference)
+{
+    modern::set_theme(preference);
+    sync_appearance_menu();
+    apply_theme();
+
+    char message[64];
+    if (preference == modern::Theme::System) {
+        std::snprintf(message,
+                      sizeof(message),
+                      "Appearance: follow system (%s)",
+                      modern::theme_name(modern::theme()));
+    } else {
+        std::snprintf(message, sizeof(message), "Appearance: %s", modern::theme_name(modern::theme()));
+    }
+    set_status(message);
 }
 
 void MainWindow::update_menu_states()
@@ -368,6 +464,14 @@ void MainWindow::select_disk(int disk_index, int slot)
         /* Clicking the disk header shows the disk overview: every partition
          * stays visible in the map, none is selected. */
         state()->selected_partition = -1;
+    }
+    if (view_ == View::Files && state()->selected_partition < 0) {
+        /* The Files view has no map/details to show an overview, so choose a
+         * partition when a disk header is clicked there. */
+        const int fallback = default_partition_slot();
+        if (fallback >= 0) {
+            state()->selected_partition = fallback;
+        }
     }
     if (state()->selected_partition >= 0) {
         char message[64];
@@ -493,26 +597,56 @@ void MainWindow::layout_children()
     if (sidebar_ == nullptr) {
         return;
     }
+    const bool files_view = view_ == View::Files;
+    if (map_ != nullptr) {
+        if (files_view) map_->hide(); else map_->show();
+    }
+    if (details_ != nullptr) {
+        if (files_view) details_->hide(); else details_->show();
+    }
+    if (host_ != nullptr) {
+        if (files_view) host_->show(); else host_->hide();
+    }
+    if (files_ != nullptr) {
+        if (files_view) files_->show(); else files_->hide();
+    }
+
     const int content_h = std::max(200, h() - content_y_ - status_h_);
     sidebar_->resize(0, content_y_, sidebar_w_, content_h);
 
     const int main_x = sidebar_w_ + gap_;
     const int main_w = w() - main_x - gap_;
-    map_->resize(main_x, content_y_ + 44, main_w, 64);
+    if (files_view) {
+        /* Files view: the dual browser replaces the partition map and details
+         * card, giving file management the whole content area. */
+        const int browser_y = content_y_ + 48;
+        const int browser_h = std::max(140, h() - browser_y - status_h_ - 6);
+        const int host_w = std::max(400, (main_w - gap_) * 46 / 100);
+        if (host_ != nullptr) {
+            host_->resize(main_x, browser_y, host_w, browser_h);
+        }
+        files_->resize(main_x + host_w + gap_, browser_y, main_w - host_w - gap_, browser_h);
+    } else {
+        map_->resize(main_x, content_y_ + 44, main_w, 64);
+        const int details_y = content_y_ + 116;
+        const int details_h = std::max(190, h() - details_y - status_h_ - 8);
+        details_->set_right_width(right_w_);
+        details_->resize(main_x, details_y, main_w, details_h);
+    }
 
-    const int details_y = content_y_ + 116;
-    const int details_h = 190;
-    details_->set_right_width(right_w_);
-    details_->resize(main_x, details_y, main_w, details_h);
-
-    const int files_y = details_y + details_h + 18;
-    const int files_h = std::max(140, h() - files_y - status_h_ - 6);
-    files_->set_right_width(right_w_);
-    files_->resize(main_x, files_y, main_w, files_h);
     if (apply_button_ != nullptr) {
         const int button_w = 120;
         apply_button_->resize(w() - 14 - button_w, content_y_ + 8, button_w, 26);
     }
+
+    tab_h_ = 24;
+    tab_y_ = content_y_ + 10;
+    tab_files_w_ = modern::text_width("Files", 11, true) + 30;
+    tab_manage_w_ = modern::text_width("Manage", 11, true) + 30;
+    const int right = apply_button_ != nullptr ? apply_button_->x() - 14 : w() - 14;
+    /* Manage is the default view, so it sits on the left of the switch. */
+    tab_manage_x_ = right - tab_files_w_ - tab_manage_w_;
+    tab_files_x_ = tab_manage_x_ + tab_manage_w_;
     redraw();
 }
 
@@ -522,71 +656,144 @@ void MainWindow::resize(int x, int y, int w, int h)
     layout_children();
 }
 
+void MainWindow::set_view(View view)
+{
+    if (view_ == view) {
+        return;
+    }
+    view_ = view;
+    if (view == View::Files) {
+        disk_info_t *disk = current_disk();
+        const int slot = state()->selected_partition;
+        if (disk != nullptr &&
+            (slot < 0 || slot >= MAX_PART_COUNT || !disk->partitions[slot].active)) {
+            const int fallback = default_partition_slot();
+            if (fallback >= 0) {
+                state()->selected_partition = fallback;
+            }
+        }
+    }
+    layout_children();
+    refresh_views();
+    redraw();
+}
+
+int MainWindow::handle(int event)
+{
+    if (event == FL_PUSH && Fl::event_button() == FL_LEFT_MOUSE) {
+        const int mx = Fl::event_x();
+        const int my = Fl::event_y();
+        if (my >= tab_y_ && my < tab_y_ + tab_h_) {
+            if (mx >= tab_files_x_ && mx < tab_files_x_ + tab_files_w_) {
+                set_view(View::Files);
+                return 1;
+            }
+            if (mx >= tab_manage_x_ && mx < tab_manage_x_ + tab_manage_w_) {
+                set_view(View::Manage);
+                return 1;
+            }
+        }
+    }
+    return Fl_Double_Window::handle(event);
+}
+
+void MainWindow::draw_view_tabs()
+{
+    if (tab_h_ <= 0) {
+        return;
+    }
+    const int total_w = tab_manage_x_ + tab_manage_w_ - tab_files_x_;
+    modern::fill_round(tab_files_x_, tab_y_, total_w, tab_h_, 8, modern::color(modern::Palette::kPanelAlt));
+    modern::stroke_round(tab_files_x_, tab_y_, total_w, tab_h_, 8, modern::color(modern::Palette::kButtonEdge), 1);
+    const auto segment = [this](int sx, int sw, const char *label, bool active) {
+        if (active) {
+            modern::fill_round(sx + 2, tab_y_ + 2, sw - 4, tab_h_ - 4, 6, modern::color(modern::Palette::kAccentSoft));
+        }
+        modern::text_center(label,
+                            sx + sw / 2,
+                            tab_y_ + tab_h_ / 2 + 4,
+                            modern::color(active ? modern::Palette::kDark : modern::Palette::kGray2),
+                            11,
+                            active);
+    };
+    segment(tab_manage_x_, tab_manage_w_, "Manage", view_ == View::Manage);
+    segment(tab_files_x_, tab_files_w_, "Files", view_ == View::Files);
+}
+
 void MainWindow::draw_heading()
 {
     const int x = sidebar_w_ + gap_;
     const int y = content_y_ + 10;
-    const int width = w() - x - gap_;
+    /* Reserve the left edge of the whole switch, not of one segment: the two
+     * segments are stored independently and their order may change. */
+    const int tab_left = tab_manage_x_ > 0 ? std::min(tab_manage_x_, tab_files_x_) : 0;
+    const int text_right = tab_left > 0 ? tab_left - 16 : w() - 14;
     disk_info_t *disk = current_disk();
     if (disk == nullptr) {
-        /* A second line used to sit here, but the disk map card starts right
-         * below the heading and covered it; the sidebar and the empty details
-         * card already explain how to open an image. */
-        modern::text("No disk selected", x, y + 22, modern::color(modern::kDark), 15, true);
+        modern::text("No disk selected", x, y + 22, modern::color(modern::Palette::kDark), 15, true);
+        draw_view_tabs();
         return;
     }
-    const int right_edge = apply_button_ != nullptr ? apply_button_->x() - 12 : x + width;
-    const std::string title =
+    std::string title =
         "Disk " + std::to_string(state()->selected_disk) + "  \xE2\x80\x94  " + disk->name;
+    if (view_ == View::Files && state()->selected_partition >= 0) {
+        title += "  \xC2\xB7  Partition " + std::to_string(state()->selected_partition);
+    }
+    const int title_width = view_ == View::Manage
+                                ? std::max(100, text_right - 420 - 16 - x)
+                                : std::max(100, text_right - x);
     modern::text_clipped(title,
                          x,
                          y,
-                         std::max(100, right_edge - 420 - 16 - x),
+                         title_width,
                          24,
-                         modern::color(disk->valid ? modern::kDark : modern::kWarning),
+                         modern::color(disk->valid ? modern::Palette::kDark : modern::Palette::kWarning),
                          15,
                          true);
-    int used_slots = 0;
-    for (int slot = 0; slot < MAX_PART_COUNT; ++slot) {
-        if (disk->partitions[slot].active) {
-            ++used_slots;
+    if (view_ == View::Manage) {
+        int used_slots = 0;
+        for (int slot = 0; slot < MAX_PART_COUNT; ++slot) {
+            if (disk->partitions[slot].active) {
+                ++used_slots;
+            }
         }
+        char right[128];
+        std::snprintf(right,
+                      sizeof(right),
+                      "%s  \xC2\xB7  %s  \xC2\xB7  %d of %d slots used",
+                      utils::format_size(disk->size_bytes).c_str(),
+                      disk->has_mbr ? "MBR" : "Raw",
+                      used_slots,
+                      MAX_PART_COUNT);
+        modern::text_clipped(right,
+                             text_right - 420,
+                             y + 4,
+                             420,
+                             18,
+                             modern::color(modern::Palette::kGray),
+                             10,
+                             false,
+                             FL_ALIGN_RIGHT | FL_ALIGN_CLIP);
     }
-    char right[128];
-    std::snprintf(right,
-                  sizeof(right),
-                  "%s  \xC2\xB7  %s  \xC2\xB7  %d of %d slots used",
-                  utils::format_size(disk->size_bytes).c_str(),
-                  disk->has_mbr ? "MBR" : "Raw",
-                  used_slots,
-                  MAX_PART_COUNT);
-    modern::text_clipped(right,
-                         right_edge - 420,
-                         y + 4,
-                         420,
-                         18,
-                         modern::color(modern::kGray),
-                         10,
-                         false,
-                         FL_ALIGN_RIGHT | FL_ALIGN_CLIP);
+    draw_view_tabs();
 }
 
 void MainWindow::draw_statusbar()
 {
     const int y = h() - status_h_;
-    fl_color(modern::color(modern::kTitleBg));
+    fl_color(modern::color(modern::Palette::kTitleBg));
     fl_rectf(0, y, w(), status_h_);
-    fl_color(modern::color(modern::kTitleLine));
+    fl_color(modern::color(modern::Palette::kTitleLine));
     fl_line(0, y, w(), y);
 
-    modern::text_clipped(status_text_, 14, y + 4, w() - 280, 16, modern::color(modern::kGray), 10, false);
+    modern::text_clipped(status_text_, 14, y + 4, w() - 280, 16, modern::color(modern::Palette::kGray), 10, false);
 
     disk_info_t *disk = current_disk();
     if (disk != nullptr) {
         const bool pending = disk->has_staged_changes;
         const char *label = pending ? "Unsaved changes" : "All changes written";
-        const Fl_Color text_color = modern::color(pending ? modern::kWarning : modern::kSuccess);
-        const Fl_Color bg = modern::lighten(text_color, 0.88);
+        const Fl_Color text_color = modern::color(pending ? modern::Palette::kWarning : modern::Palette::kSuccess);
+        const Fl_Color bg = modern::surface_tint(text_color, 0.88);
         const int label_w = modern::text_width(label, 10, false);
         const int pill_w = label_w + 34;
         const int pill_x = w() - 14 - pill_w;
@@ -599,7 +806,7 @@ void MainWindow::draw_statusbar()
 
 void MainWindow::draw()
 {
-    fl_color(modern::color(modern::kWindow));
+    fl_color(modern::color(modern::Palette::kWindow));
     fl_rectf(0, 0, w(), h());
     draw_heading();
     draw_statusbar();
@@ -812,6 +1019,8 @@ void MainWindow::show_shortcuts()
                "Ctrl+E   Export the selection\n"
                "Ctrl+B   Focus the file browser\n"
                "Ctrl+F   Focus the search field\n"
+               "Ctrl+1   Files view\n"
+               "Ctrl+2   Manage view\n"
                "F5       Refresh devices\n"
                "Delete   Delete the selected partition\n"
                "Ctrl+Q   Quit");
@@ -932,6 +1141,31 @@ bool MainWindow::confirm_quit()
             state()->selected_partition = -1;
         }
     }
+}
+
+void MainWindow::copy_host_to_disk(const std::vector<std::string> &host_paths)
+{
+    if (files_ == nullptr) {
+        return;
+    }
+    if (!files_->has_target()) {
+        set_status("Select a ZealFS partition to copy into");
+        return;
+    }
+    files_->import_host_paths(host_paths);
+}
+
+void MainWindow::copy_disk_to_host()
+{
+    if (files_ == nullptr || host_ == nullptr) {
+        return;
+    }
+    if (!files_->has_selection()) {
+        set_status("Select disk files or folders to copy");
+        return;
+    }
+    files_->export_selection_to_host(host_->current_path());
+    host_->refresh();
 }
 
 void MainWindow::apply_cb(Fl_Widget *, void *data)

@@ -25,11 +25,11 @@ void FileBrowserPanel::draw_scrollbar(int sx, int sy, int sw, int sh, int total,
     if (total <= visible || sh <= 0) {
         return;
     }
-    modern::fill_round(sx, sy, sw, sh, sw / 2, modern::color(modern::kDividerSoft));
+    modern::fill_round(sx, sy, sw, sh, sw / 2, modern::color(modern::Palette::kDividerSoft));
     const int thumb_h = std::max(24, sh * visible / total);
     const int max_scroll = std::max(1, total - visible);
     const int thumb_y = sy + (sh - thumb_h) * offset / max_scroll;
-    modern::fill_round(sx, thumb_y, sw, thumb_h, sw / 2, modern::color(0xb9c3d1));
+    modern::fill_round(sx, thumb_y, sw, thumb_h, sw / 2, modern::color(modern::Palette::kScrollThumb));
 }
 
 void FileBrowserPanel::draw_navigation()
@@ -55,13 +55,13 @@ void FileBrowserPanel::draw_navigation()
     for (const NavButton &button : buttons) {
         const bool hovered = hover_kind_ == (int) button.kind;
         if (hovered && button.enabled) {
-            modern::fill_round(button.x - 1, nav_y, 30, 30, 7, modern::color(modern::kHover));
+            modern::fill_round(button.x - 1, nav_y, 30, 30, 7, modern::color(modern::Palette::kHover));
         }
         modern::draw_glyph(button.glyph,
                            button.x + 14,
                            nav_y + 15,
                            16,
-                           modern::color(button.enabled ? (unsigned) modern::kIconDark : 0xc5ccd6u));
+                           modern::color(button.enabled ? modern::Palette::kIconDark : modern::Palette::kTextDisabled));
     }
 
     crumbs_.clear();
@@ -86,7 +86,8 @@ void FileBrowserPanel::draw_navigation()
     }
 
     const int crumb_start = x() + 140;
-    const int crumb_end = preview_x_ - 10;
+    const int crumb_end = search_ != nullptr ? search_->x() - 24
+                                             : (show_preview_ ? preview_x_ - 10 : x() + w() - 12);
     const int available = std::max(0, crumb_end - crumb_start);
     int total_width = 0;
     for (size_t index = 0; index < crumbs_.size(); ++index) {
@@ -113,7 +114,7 @@ void FileBrowserPanel::draw_navigation()
     }
     int bx = crumb_start;
     if (first > 0) {
-        modern::draw_glyph(modern::Glyph::More, bx + 7, nav_y + 15, 14, modern::color(modern::kGray2));
+        modern::draw_glyph(modern::Glyph::More, bx + 7, nav_y + 15, 14, modern::color(modern::Palette::kGray2));
         bx += 18;
         total_width += 6;
     }
@@ -125,7 +126,7 @@ void FileBrowserPanel::draw_navigation()
                                bx + kCrumbSeparator / 2,
                                nav_y + 15,
                                12,
-                               modern::color(modern::kGray2));
+                               modern::color(modern::Palette::kGray2));
             bx += kCrumbSeparator;
         }
         const bool hovered = hover_kind_ == (int) HitKind::Crumb && hover_index_ == (int) index;
@@ -138,8 +139,8 @@ void FileBrowserPanel::draw_navigation()
                                width,
                                28,
                                7,
-                               modern::color(hovered ? 0xd7e8fbu : (unsigned) modern::kAccentSoft));
-            modern::text(crumb.name, bx + 9, nav_y + 20, modern::color(modern::kAccent), 11, true);
+                               modern::color(hovered ? modern::Palette::kAccentSoftHover : modern::Palette::kAccentSoft));
+            modern::text(crumb.name, bx + 9, nav_y + 20, modern::color(modern::Palette::kAccent), 11, true);
             bx += width;
         } else {
             const int width = modern::text_width(crumb.name, 11, false);
@@ -148,11 +149,11 @@ void FileBrowserPanel::draw_navigation()
             modern::text(crumb.name,
                          bx,
                          nav_y + 20,
-                         modern::color(hovered ? modern::kAccent : modern::kDark),
+                         modern::color(hovered ? modern::Palette::kAccent : modern::Palette::kDark),
                          11,
                          false);
             if (hovered) {
-                fl_color(modern::color(modern::kAccent));
+                fl_color(modern::color(modern::Palette::kAccent));
                 fl_line(bx, nav_y + 23, bx + width, nav_y + 23);
             }
             bx += width;
@@ -176,18 +177,19 @@ void FileBrowserPanel::draw_actions()
         bool enabled;
         HitKind kind;
     };
+    /* Import/Export stay in the Edit menu; the host pane replaces the old
+     * dialog-based copy buttons in the dual layout. */
     const ActionButton buttons[] = {
-        {import_x_, import_w_, "Import", modern::Glyph::Import, target, HitKind::Import},
-        {export_x_, export_w_, "Export", modern::Glyph::Export, target && selected, HitKind::Export},
         {new_folder_x_, new_folder_w_, "New folder", modern::Glyph::NewFolder, target, HitKind::NewFolder},
         {delete_x_, delete_w_, "Delete", modern::Glyph::Delete, target && selected, HitKind::Delete},
+        {copy_x_, copy_w_, "To host", modern::Glyph::Export, target && selected, HitKind::CopyToHost},
     };
     for (const ActionButton &button : buttons) {
         const bool hovered = hover_kind_ == (int) button.kind;
         if (hovered && button.enabled) {
-            modern::fill_round(button.x - 2, action_y, button.w + 4, 28, 7, modern::color(modern::kHover));
+            modern::fill_round(button.x - 2, action_y, button.w + 4, 28, 7, modern::color(modern::Palette::kHover));
         }
-        const Fl_Color fg = modern::color(button.enabled ? (unsigned) modern::kDark2 : 0xb8c0ccu);
+        const Fl_Color fg = modern::color(button.enabled ? modern::Palette::kDark2 : modern::Palette::kTextDisabled);
         modern::draw_glyph(button.glyph, button.x + 10, action_y + 14, 16, fg);
         modern::text(button.label, button.x + 24, action_y + 19, fg, 11, false);
     }
@@ -205,19 +207,19 @@ void FileBrowserPanel::draw_actions()
                       (int) count_,
                       count_ == 1 ? "" : "s");
     }
-    if (count[0] != 0) {
+    if (count[0] != 0 && show_preview_) {
         modern::text_clipped(count,
                              preview_x_ - 180,
                              action_y + 8,
                              168,
                              18,
-                             modern::color(modern::kGray2),
+                             modern::color(modern::Palette::kGray2),
                              10,
                              false,
                              FL_ALIGN_RIGHT | FL_ALIGN_CLIP);
     }
 
-    fl_color(modern::color(modern::kDividerSoft));
+    fl_color(modern::color(modern::Palette::kDividerSoft));
     fl_line(x(), y() + nav_h_ + actions_h_ + 1, preview_x_ - 12, y() + nav_h_ + actions_h_ + 1);
 }
 
@@ -235,7 +237,7 @@ void FileBrowserPanel::draw_tree()
                              body_top + 18,
                              tree_w_ - 24,
                              40,
-                             modern::color(modern::kGray2),
+                             modern::color(modern::Palette::kGray2),
                              10,
                              false,
                              FL_ALIGN_LEFT | FL_ALIGN_WRAP | FL_ALIGN_CLIP);
@@ -254,9 +256,9 @@ void FileBrowserPanel::draw_tree()
         const bool hovered = hover_kind_ == (int) HitKind::TreeRow && hover_index_ == index;
         if (row.current) {
             modern::fill_round(x() + 5, y, tree_w_ - 12, kTreeRowHeight - 2, 6,
-                               modern::color(modern::kSelection));
+                               modern::color(modern::Palette::kSelection));
         } else if (hovered) {
-            modern::fill_round(x() + 5, y, tree_w_ - 12, kTreeRowHeight - 2, 6, modern::color(modern::kHover));
+            modern::fill_round(x() + 5, y, tree_w_ - 12, kTreeRowHeight - 2, 6, modern::color(modern::Palette::kHover));
         }
         const int indent = 16 + row.depth * 14;
         if (row.has_children) {
@@ -265,11 +267,11 @@ void FileBrowserPanel::draw_tree()
                                x() + indent - 9,
                                y + kTreeRowHeight / 2 - 1,
                                10,
-                               modern::color(row.current ? modern::kAccent : modern::kGray2));
+                               modern::color(row.current ? modern::Palette::kAccent : modern::Palette::kGray2));
         }
         if (row.depth == 0) {
             modern::draw_drive(x() + indent, y + 6, 15, 15,
-                               modern::color(row.current ? modern::kAccent : modern::kGray2));
+                               modern::color(row.current ? modern::Palette::kAccent : modern::Palette::kGray2));
         } else {
             modern::draw_folder(x() + indent, y + 7, 15, 13);
         }
@@ -278,7 +280,7 @@ void FileBrowserPanel::draw_tree()
                              y + 6,
                              tree_w_ - indent - 32,
                              16,
-                             modern::color(row.current ? modern::kDark : modern::kDark2),
+                             modern::color(row.current ? modern::Palette::kDark : modern::Palette::kDark2),
                              11,
                              row.current);
     }
@@ -286,7 +288,7 @@ void FileBrowserPanel::draw_tree()
         modern::text("No subfolders",
                      x() + 34,
                      row_y0 + kTreeRowHeight + 10,
-                     modern::color(modern::kGray2),
+                     modern::color(modern::Palette::kGray2),
                      10,
                      false);
     }
@@ -299,7 +301,7 @@ void FileBrowserPanel::draw_tree()
                    (int) tree_rows_.size() * kTreeRowHeight,
                    body_bottom - body_top - 8,
                    tree_scroll_);
-    fl_color(modern::color(modern::kDividerSoft));
+    fl_color(modern::color(modern::Palette::kDividerSoft));
     fl_line(x() + tree_w_, body_top, x() + tree_w_, body_bottom);
 }
 
@@ -311,10 +313,10 @@ void FileBrowserPanel::draw_table()
     const int list_top = body_top + kTableHeader;
     const int list_height = std::max(1, body_bottom - list_top - 2);
 
-    modern::text("Name", table_x_ + 10, body_top + 20, modern::color(modern::kGray), 10, false);
-    modern::text("Size", columns.size_x + 4, body_top + 20, modern::color(modern::kGray), 10, false);
-    modern::text("Type", columns.type_x + 4, body_top + 20, modern::color(modern::kGray), 10, false);
-    modern::text("Modified", columns.mod_x + 4, body_top + 20, modern::color(modern::kGray), 10, false);
+    modern::text("Name", table_x_ + 10, body_top + 20, modern::color(modern::Palette::kGray), 10, false);
+    modern::text("Size", columns.size_x + 4, body_top + 20, modern::color(modern::Palette::kGray), 10, false);
+    modern::text("Type", columns.type_x + 4, body_top + 20, modern::color(modern::Palette::kGray), 10, false);
+    modern::text("Modified", columns.mod_x + 4, body_top + 20, modern::color(modern::Palette::kGray), 10, false);
 
     const int header_x[] = {table_x_ + 10, columns.size_x + 4, columns.type_x + 4, columns.mod_x + 4};
     for (int column = 0; column < 4; ++column) {
@@ -327,9 +329,9 @@ void FileBrowserPanel::draw_table()
                            tx + 4,
                            body_top + 15,
                            10,
-                           modern::color(modern::kAccent));
+                           modern::color(modern::Palette::kAccent));
     }
-    fl_color(modern::color(modern::kDividerSoft));
+    fl_color(modern::color(modern::Palette::kDividerSoft));
     fl_line(table_x_, body_top + kTableHeader - 1, table_x_ + table_w_, body_top + kTableHeader - 1);
 
     fl_push_clip(table_x_, list_top, table_w_, list_height);
@@ -337,14 +339,14 @@ void FileBrowserPanel::draw_table()
         modern::text_center("Select a ZealFS partition to browse its files",
                             table_x_ + table_w_ / 2,
                             list_top + 34,
-                            modern::color(modern::kGray2),
+                            modern::color(modern::Palette::kGray2),
                             11,
                             false);
     } else if (order_.empty()) {
         modern::text_center(filter_.empty() ? "This folder is empty" : "No matching entries",
                             table_x_ + table_w_ / 2,
                             list_top + 34,
-                            modern::color(modern::kGray2),
+                            modern::color(modern::Palette::kGray2),
                             11,
                             false);
     } else {
@@ -360,10 +362,10 @@ void FileBrowserPanel::draw_table()
             const bool hovered = hover_kind_ == (int) HitKind::TableRow && hover_index_ == index;
             if (selected) {
                 modern::fill_round(table_x_ + 4, y + 1, table_w_ - 16, kRowHeight - 2, 5,
-                                   modern::color(modern::kSelection));
+                                   modern::color(modern::Palette::kSelection));
             } else if (hovered) {
                 modern::fill_round(table_x_ + 4, y + 1, table_w_ - 16, kRowHeight - 2, 5,
-                                   modern::color(modern::kHover));
+                                   modern::color(modern::Palette::kHover));
             }
             const zfs_entry &entry = entries_[order_[index]];
             const int icon_x = table_x_ + 12;
@@ -377,32 +379,32 @@ void FileBrowserPanel::draw_table()
                                  y + 7,
                                  columns.size_x - icon_x - 30,
                                  16,
-                                 modern::color(selected ? modern::kDark : modern::kDark2),
+                                 modern::color(selected ? modern::Palette::kDark : modern::Palette::kDark2),
                                  11,
                                  current);
             if (!entry.directory) {
                 modern::text(utils::format_size(entry.size, true),
                              columns.size_x + 4,
                              y + 18,
-                             modern::color(modern::kGray),
+                             modern::color(modern::Palette::kGray),
                              10,
                              false);
             } else {
-                modern::text("-", columns.size_x + 4, y + 18, modern::color(modern::kGray2), 10, false);
+                modern::text("-", columns.size_x + 4, y + 18, modern::color(modern::Palette::kGray2), 10, false);
             }
             modern::text(type_name(entry),
                          columns.type_x + 4,
                          y + 18,
-                         modern::color(modern::kGray),
+                         modern::color(modern::Palette::kGray),
                          10,
                          false);
             modern::text(timestamp(entry),
                          columns.mod_x + 4,
                          y + 18,
-                         modern::color(modern::kGray),
+                         modern::color(modern::Palette::kGray),
                          10,
                          false);
-            fl_color(modern::color(0xeef1f5));
+            fl_color(modern::color(modern::Palette::kHoverSoft));
             fl_line(table_x_ + 8, y + kRowHeight - 1, table_x_ + table_w_ - 12, y + kRowHeight - 1);
         }
     }
@@ -414,7 +416,7 @@ void FileBrowserPanel::draw_table()
                              table_w_ - 4,
                              body_bottom - body_top - 4,
                              6,
-                             modern::color(modern::kAccentEdge),
+                             modern::color(modern::Palette::kAccentEdge),
                              1);
     }
 
@@ -437,27 +439,27 @@ void FileBrowserPanel::draw_preview()
         preview_action_w_ = 0;
         return;
     }
-    modern::fill_round(px, py, pw, ph, 10, modern::color(modern::kPanel));
-    modern::stroke_round(px, py, pw, ph, 10, modern::color(modern::kDivider), 1);
+    modern::fill_round(px, py, pw, ph, 10, modern::color(modern::Palette::kPanel));
+    modern::stroke_round(px, py, pw, ph, 10, modern::color(modern::Palette::kDivider), 1);
 
     const int entry_index = selected_entry();
     if (!target_valid_) {
         modern::text("No partition selected",
                      px + 20,
                      py + 38,
-                     modern::color(modern::kDark),
+                     modern::color(modern::Palette::kDark),
                      13,
                      true);
         modern::text("Choose a partition in the sidebar,",
                      px + 20,
                      py + 58,
-                     modern::color(modern::kGray2),
+                     modern::color(modern::Palette::kGray2),
                      10,
                      false);
         modern::text("the map or the disk overview.",
                      px + 20,
                      py + 74,
-                     modern::color(modern::kGray2),
+                     modern::color(modern::Palette::kGray2),
                      10,
                      false);
         preview_action_w_ = 0;
@@ -467,19 +469,19 @@ void FileBrowserPanel::draw_preview()
         modern::text("No file selected",
                      px + 20,
                      py + 38,
-                     modern::color(modern::kDark),
+                     modern::color(modern::Palette::kDark),
                      13,
                      true);
         modern::text("Select a file from the list",
                      px + 20,
                      py + 58,
-                     modern::color(modern::kGray2),
+                     modern::color(modern::Palette::kGray2),
                      10,
                      false);
         modern::text("to see its details here.",
                      px + 20,
                      py + 74,
-                     modern::color(modern::kGray2),
+                     modern::color(modern::Palette::kGray2),
                      10,
                      false);
         preview_action_w_ = 0;
@@ -490,12 +492,12 @@ void FileBrowserPanel::draw_preview()
         modern::text(std::to_string(multi_count_) + " items selected",
                      px + 20,
                      py + 38,
-                     modern::color(modern::kDark),
+                     modern::color(modern::Palette::kDark),
                      13,
                      true);
         int summary_y = py + 64;
         for (const std::string &line : preview_lines_) {
-            modern::text(line, px + 20, summary_y, modern::color(modern::kGray), 10, false);
+            modern::text(line, px + 20, summary_y, modern::color(modern::Palette::kGray), 10, false);
             summary_y += 18;
         }
         preview_action_w_ = 0;
@@ -515,29 +517,29 @@ void FileBrowserPanel::draw_preview()
                          py + 18,
                          pw - 78,
                          36,
-                         modern::color(modern::kDark),
+                         modern::color(modern::Palette::kDark),
                          13,
                          true,
                          FL_ALIGN_LEFT | FL_ALIGN_WRAP | FL_ALIGN_CLIP);
     modern::text(std::string("Type: ") + (entry.directory ? "Folder" : type_name(entry)),
                  px + 16,
                  py + 76,
-                 modern::color(modern::kGray),
+                 modern::color(modern::Palette::kGray),
                  10,
                  false);
     modern::text(std::string("Size: ") + (entry.directory ? "-" : utils::format_size(entry.size, true)),
                  px + 16,
                  py + 92,
-                 modern::color(modern::kGray),
+                 modern::color(modern::Palette::kGray),
                  10,
                  false);
     modern::text(std::string("Modified: ") + timestamp(entry),
                  px + 16,
                  py + 108,
-                 modern::color(modern::kGray),
+                 modern::color(modern::Palette::kGray),
                  10,
                  false);
-    fl_color(modern::color(modern::kDividerSoft));
+    fl_color(modern::color(modern::Palette::kDividerSoft));
     fl_line(px + 14, py + 120, px + pw - 14, py + 120);
 
     int text_y = py + 138;
@@ -551,16 +553,16 @@ void FileBrowserPanel::draw_preview()
                              text_y - 4,
                              pw - 32,
                              text_bottom - text_y + 8,
-                             modern::color(modern::kGray),
+                             modern::color(modern::Palette::kGray),
                              10,
                              false,
                              FL_ALIGN_LEFT | FL_ALIGN_WRAP | FL_ALIGN_CLIP);
     } else if (!preview_message_.empty() && preview_lines_.empty()) {
-        modern::text(preview_message_, px + 16, text_y, modern::color(modern::kGray), 10, false);
+        modern::text(preview_message_, px + 16, text_y, modern::color(modern::Palette::kGray), 10, false);
     } else {
         for (const std::string &line : preview_lines_) {
             if (text_y > text_bottom) {
-                modern::text("...", px + 16, text_y, modern::color(modern::kGray2), 10, false);
+                modern::text("...", px + 16, text_y, modern::color(modern::Palette::kGray2), 10, false);
                 break;
             }
             modern::text_clipped(line,
@@ -568,7 +570,7 @@ void FileBrowserPanel::draw_preview()
                                  text_y - 9,
                                  pw - 32,
                                  15,
-                                 modern::color(modern::kDark2),
+                                 modern::color(modern::Palette::kDark2),
                                  10,
                                  false);
             text_y += 15;
@@ -585,51 +587,72 @@ void FileBrowserPanel::draw_preview()
                        preview_action_w_,
                        preview_action_h_,
                        7,
-                       modern::color(hovered ? modern::kHover : modern::kPanel));
+                       modern::color(hovered ? modern::Palette::kHover : modern::Palette::kPanel));
     modern::stroke_round(preview_action_x_,
                          preview_action_y_,
                          preview_action_w_,
                          preview_action_h_,
                          7,
-                         modern::color(modern::kButtonEdge),
+                         modern::color(modern::Palette::kButtonEdge),
                          1);
     modern::draw_glyph(entry.directory ? modern::Glyph::FolderOpen : modern::Glyph::Export,
                        preview_action_x_ + 18,
                        preview_action_y_ + preview_action_h_ / 2,
                        16,
-                       modern::color(modern::kDark2));
+                       modern::color(modern::Palette::kDark2));
     modern::text(entry.directory ? "Open folder" : "Export...",
                  preview_action_x_ + 34,
                  preview_action_y_ + 20,
-                 modern::color(modern::kDark2),
+                 modern::color(modern::Palette::kDark2),
                  11,
                  false);
+}
+
+void FileBrowserPanel::draw_transfer_hint()
+{
+    const int body_bottom = y() + h() - 4;
+    modern::stroke_round(x() + 2,
+                         body_y_ + 2,
+                         w() - 4,
+                         body_bottom - body_y_ - 4,
+                         9,
+                         modern::color(modern::Palette::kAccent),
+                         2);
 }
 
 void FileBrowserPanel::draw()
 {
     fl_push_clip(x(), y(), w(), h());
-    fl_color(modern::color(modern::kWindow));
+    fl_color(modern::color(modern::Palette::kWindow));
     fl_rectf(x(), y(), w(), h());
 
     draw_navigation();
-    modern::draw_glyph(modern::Glyph::Search,
-                       preview_x_ + 18,
-                       y() + 21,
-                       14,
-                       modern::color(modern::kGray2));
+    if (search_ != nullptr) {
+        modern::draw_glyph(modern::Glyph::Search,
+                           search_->x() - 14,
+                           search_->y() + search_->h() / 2,
+                           14,
+                           modern::color(modern::Palette::kGray2));
+    }
     draw_actions();
 
     const int card_w = preview_x_ - 12 - x();
     const int body_h = y() + h() - 4 - body_y_;
-    modern::fill_round(x(), body_y_, card_w, body_h, 10, modern::color(modern::kPanel));
-    modern::stroke_round(x(), body_y_, card_w, body_h, 10, modern::color(modern::kDivider), 1);
+    modern::fill_round(x(), body_y_, card_w, body_h, 10, modern::color(modern::Palette::kPanel));
+    modern::stroke_round(x(), body_y_, card_w, body_h, 10, modern::color(modern::Palette::kDivider), 1);
 
-    draw_tree();
-    fl_color(modern::color(modern::kDividerSoft));
-    fl_line(table_x_ - 10, body_y_, table_x_ - 10, y() + h() - 4);
+    if (show_tree_) {
+        draw_tree();
+        fl_color(modern::color(modern::Palette::kDividerSoft));
+        fl_line(table_x_ - 10, body_y_, table_x_ - 10, y() + h() - 4);
+    }
     draw_table();
-    draw_preview();
+    if (show_preview_) {
+        draw_preview();
+    }
+    if (transfer_hint_) {
+        draw_transfer_hint();
+    }
     if (drop_active_) {
         const int body_bottom = y() + h() - 4;
         modern::stroke_round(x() + 2,
@@ -637,16 +660,16 @@ void FileBrowserPanel::draw()
                              w() - 4,
                              body_bottom - body_y_ - 4,
                              9,
-                             modern::color(modern::kAccent),
+                             modern::color(modern::Palette::kAccent),
                              2);
         const int label_w = 200;
         const int label_x = x() + (w() - label_w) / 2;
         const int label_y = body_y_ + 8;
-        modern::fill_round(label_x, label_y, label_w, 28, 8, modern::color(modern::kAccent));
+        modern::fill_round(label_x, label_y, label_w, 28, 8, modern::color(modern::Palette::kAccent));
         modern::text_center("Drop files to import",
                             label_x + label_w / 2,
                             label_y + 19,
-                            modern::color(modern::kPanel),
+                            modern::color(modern::Palette::kPanel),
                             11,
                             true);
     }
@@ -660,7 +683,7 @@ void FileBrowserPanel::draw()
         modern::text("Search this folder",
                      search_->x() + 7,
                      search_->y() + search_->h() / 2 + 4,
-                     modern::color(modern::kGray2),
+                     modern::color(modern::Palette::kGray2),
                      11,
                      false);
         fl_pop_clip();

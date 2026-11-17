@@ -32,15 +32,21 @@ card rather than an image.
 - **Edit** — import, export, create folders and delete entries in the file
   browser, plus focus and search shortcuts.
 - **Help** — keyboard shortcuts and the About box.
-- **Heading** — the selected disk's name and its size, layout and slot usage,
-  with the **Apply changes** button on the right. The button is enabled while
-  that disk has pending changes and writes them, like **File → Apply Changes**
-  or `Ctrl+S`.
+- **Manage / Files tabs** — switch between the two views, with **Manage** on
+  the left as the default. Manage shows the partition map, details and actions
+  while hiding the browsers; **Files** focuses on the host and disk file
+  browsers and hides the partition map and details card. `Ctrl+1` and `Ctrl+2`,
+  or the **View** menu, do the same.
+- **Heading** — the selected disk's name, plus the partition in the Files view
+  and the size/layout/slot usage in the Manage view, with the **Apply changes**
+  button on the right. The button is enabled while that disk has pending changes
+  and writes them, like **File → Apply Changes** or `Ctrl+S`.
 - **Disks sidebar** — every discovered disk and its partitions. Clicking a disk
-  header shows that disk's overview, while clicking a partition row selects it;
-  the disk header is highlighted only in the overview. The **+** button opens a
-  menu for new partitions, images and MBR tables. Disks with unsaved changes
-  show an amber dot.
+  header shows that disk's overview in the Manage view (and picks its first
+  usable partition in the Files view), while clicking a partition row selects
+  it; the disk header is highlighted only in the overview. The **+** button
+  opens a menu for new partitions, images and MBR tables. Disks with unsaved
+  changes show an amber dot.
 - **Disk map** — proportional coloured segments for the selected disk; click a
   segment to select its partition.
 - **Partition details** — filesystem, total/used/free space, start address,
@@ -48,10 +54,13 @@ card rather than an image.
   **Properties** actions. In the disk overview it instead lists every partition
   of the disk (click a row to select it) with the disk's size, layout and slot
   usage.
-- **File browser** — breadcrumb navigation, a collapsible folder tree (use the
-  chevron to expand or collapse a folder), sortable file list, search field and
-  a details/preview card. It follows the selected partition and is inactive
-  while the disk overview is shown.
+- **File browser** — two side-by-side panes: the host computer on the left and
+  the selected ZealFS partition on the right. Each pane has breadcrumbs, a
+  sortable file list, its own search field and multi-select; the host pane adds
+  quick places and host file operations. **To disk** copies the host selection
+  into the current disk folder, **To host** copies the disk selection into the
+  current host folder, and dragging rows between the panes does the same. The
+  disk pane is inactive while the disk overview is shown.
 - **Status bar** — the latest operation result and the unsaved-changes badge.
 
 ## Open an image or select a card
@@ -63,9 +72,10 @@ refreshing or switching targets. If a card is missing,
 follow the shared
 [device-discovery troubleshooting](DISKS.md#a-card-is-missing-from-the-device-list).
 
-Click a disk header in the sidebar to open that disk's overview: the map still
-shows all of its partitions and the details card lists them, but no partition is
-selected and the file browser stays inactive until you pick one. Click a
+Click a disk header in the sidebar to open that disk's overview in the Manage
+view: the map still shows all of its partitions and the details card lists them,
+but no partition is selected. In the Files view the same click picks the disk's
+first usable partition so the browser has files to show. Click a
 partition row in the sidebar, a row in the overview or a map segment to select
 it. Opening or refreshing a disk selects its first usable partition. GUI
 partition labels are 0–3; see the
@@ -103,56 +113,67 @@ disk.
 
 ## Browse and manage files
 
-The file browser is embedded below the partition details and follows the
-selected ZealFS partition. Selecting another partition reloads the browser at
-its root directory.
+The **Files** tab shows the file browser full-height, without the partition map
+or details card. It is split into a host pane on the left and a disk pane on the
+right, so files can be copied between them without leaving the window. Selecting
+another partition reloads the disk pane at its root directory; the host pane
+keeps its current folder. Switch to **Manage** when you need the partition map,
+sizes or Format/Delete actions.
 
-![File browser](../md_imgs/zeal_disk_tool_browser.png)
-
-- Double-click a folder in the list to open it.
-- Use the breadcrumb chips or the back/forward/up/home buttons to navigate.
-- Click a folder in the tree to jump to it; click its chevron to collapse or
-  expand its children.
-- Hover navigation, action and tree items to see tooltips.
+- The host pane starts in your home directory. Its **Places** list jumps to
+  **Home**, **Desktop**, **Downloads**, **Documents**, the filesystem root and,
+  on Windows, the available drives.
+- Double-click a folder in either pane to open it; double-click a file to copy
+  it to the other pane.
+- Use the breadcrumb chips or the back/up/home buttons to navigate. The disk
+  pane keeps its folder tree; click a folder to jump to it and its chevron to
+  collapse or expand it.
 - Click a column header (**Name**, **Size**, **Type**, **Modified**) to sort;
-  click it again to reverse the order.
-- Type in the search field to filter the current folder; clear the text or
-  press `Esc`.
-- Click a file to preview it in the details card. Double-click a file to export
-  it.
+  click it again to reverse the order. Both panes sort independently.
+- Type in a pane's search field to filter that folder; clear the text or press
+  `Esc`.
 - Click a row to select it. `Ctrl`-click (`Command`-click on macOS) toggles
-  individual entries, `Shift`-click selects a range, and `Ctrl+A` selects every
-  entry in the current folder. The details card summarises the selection, and
-  **Delete** and **Export** act on all selected entries.
+  entries, `Shift`-click selects a range, and `Ctrl+A` selects every entry in
+  the current folder.
 
-### Import files
+### Copy files between the host and the disk
 
-Use **Edit → Import Files...** (or the **Import** button above the file list) and
-select one or more host files. Files
-are added to the directory currently shown. If a host filename exceeds 16
-bytes, a dialog asks for a shorter name; the host file itself is not renamed.
+Select files or folders in one pane and press its transfer button: **To disk**
+in the host pane or **To host** in the disk pane. You can also drag the selected
+rows onto the other pane; the target pane is outlined while a drop is possible.
+Folders are copied recursively and keep their structure.
 
-Imports are staged, and matching destination filenames are refused rather than
-replaced. If a later file fails during a multi-file import, earlier successful
-imports remain staged. Check the status bar and the list before choosing Apply
-or Cancel.
-
-Drag files or folders from the host file manager and drop them on the file list
-to import without the file dialog; the browsing area is outlined while a drop is
-possible. Dropped folders are imported recursively, preserving their structure;
-a folder that already exists is merged. Entries that break the 16-byte name
-limit are skipped and reported in the status bar. File drag-and-drop depends on
-the desktop's native drag support and is not available from every file manager.
-
-### Export a file or folder
-
-Select a file or folder, then use **Edit → Export Selection...**, the **Export**
-button in the file action row, or the **Export...** button in the preview card. Choose its destination in the save
-dialog. Export writes the host file immediately and can read staged contents;
-it does not need Apply. Selecting a folder exports its contents recursively into
-the chosen host location. With several entries selected, the dialog asks for a
-destination folder and each entry is exported into it; failures are counted in
+Host-to-disk copies are staged like other disk changes, so review them and press
+**Apply changes** when ready. A host filename longer than 16 bytes, or one that
+already exists on the disk, is skipped and reported in the status bar. Disk-to-
+host copies write the host files immediately and can read staged disk contents.
+If a later item fails in a multi-file copy, earlier items remain copied; check
 the status bar.
+
+The host pane's **New folder**, **Rename** and **Delete** act on the host
+filesystem immediately and cannot be undone. `F2` renames the selected host
+entry.
+
+### Import with the file dialog
+
+**Edit → Import Files...** still opens a file chooser and imports host files into
+the current disk folder; this is useful when the host pane is not pointing at
+the files you want. If a host filename exceeds 16 bytes, a dialog asks for a
+shorter name; the host file itself is not renamed. Imports are staged, and
+matching destination filenames are refused rather than replaced.
+
+You can also drag files or folders from the desktop file manager and drop them
+on the disk pane; the pane is outlined while a drop is possible. Dropped folders
+are imported recursively; a folder that already exists is merged. File
+drag-and-drop depends on the desktop's native drag support and is not available
+from every file manager.
+
+### Export with the file dialog
+
+**Edit → Export Selection...** exports the disk selection through a save or
+folder dialog, without copying it into the host pane's current folder. Export
+writes the host files immediately and does not need Apply. Selecting a folder
+exports its contents recursively.
 
 The distinction between an export and a raw recovery image is explained in
 [copies and backups](DISKS.md#import-export-and-backups). For CLI export of the
@@ -203,6 +224,30 @@ differs from writing a physical card. Errors and operation results appear in the
 status bar, with dialogs for some operations. After a physical write failure,
 close and reopen the target before attempting recovery.
 
+## Light and dark appearance
+
+**View → Appearance** offers three choices: **Light**, **Dark** and **Follow
+System**. The last one is the default and is re-read every time it is selected;
+the explicit choices ignore the desktop. The selection is saved in
+`zeal-disk-tool/appearance` under the user configuration directory
+(`$XDG_CONFIG_HOME` or `~/.config` on Linux, `~/Library/Application Support` on
+macOS, `%APPDATA%` on Windows) and applied at startup, before the window is
+created.
+
+FLTK 1.4 has no notion of a system appearance (see [fltk/fltk issue
+#870](https://github.com/fltk/fltk/issues/870)), so the application resolves the
+preference itself and recolours everything, including the stock FLTK widgets:
+
+| Platform | Source of the "Follow System" value |
+| --- | --- |
+| Linux | `GTK_THEME` and `KDE_COLOR_SCHEME` when set, otherwise `org.gnome.desktop.interface color-scheme` |
+| macOS | the `AppleInterfaceStyle` user default |
+| Windows | `AppsUseLightTheme` under `Themes\Personalize` in `HKCU` |
+
+When the preference cannot be read, the light palette is used. Because FLTK
+draws its own widgets, a dark desktop does not automatically give a dark
+application: the palette has to exist, which is what this menu selects.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
@@ -214,6 +259,9 @@ close and reopen the target before attempting recovery.
 | `Ctrl+E` | Export the selected file or folder |
 | `Ctrl+B` | Focus the file browser |
 | `Ctrl+F` | Focus the search field |
+| `Ctrl+1` | Show the Files view |
+| `Ctrl+2` | Show the Manage view |
+| `F2` | Rename the selected host entry |
 | `Ctrl+A` | Select every entry in the current folder |
 | `Shift+Up` / `Shift+Down` | Extend the file selection |
 | `Ctrl`-click / `Shift`-click | Toggle an entry / select a range |
