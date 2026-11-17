@@ -17,7 +17,7 @@ The Linux ARM32 binary targets ARMv7-A with hard-float, usable on the Pi 3, 4, a
 
 ## Build from source
 
-Use CMake 3.20+, a C11 compiler for the core, CLI and tests, and FLTK 1.3 or newer (1.4 recommended) for the GUI. The FLTK frontend is C++17; every other translation unit stays plain C. No GUI dependency is needed for the core or CLI, and CLI-only builds do not require a C++ compiler.
+Use CMake 3.20+, a C11 compiler for the core, CLI and tests, and FLTK 1.4 or newer for the GUI. The FLTK frontend is C++17; every other translation unit stays plain C. No GUI dependency is needed for the core or CLI, and CLI-only builds do not require a C++ compiler.
 
 ```sh
 # Headless core, CLI and tests
@@ -35,19 +35,20 @@ cmake -S . -B build/default -DFLTK_DIR=/path/to/lib/cmake/fltk
 # or point CMAKE_PREFIX_PATH at the FLTK prefix
 ```
 
-CMake uses FLTK's imported CMake targets when the installed version provides them
-(FLTK 1.4), and otherwise falls back to the `fltk-config` helper (common with
-FLTK 1.3 system packages), which also supplies the platform link libraries.
+CMake uses FLTK's imported CMake targets; if a 1.4 installation only provides
+the `fltk-config` helper, that fallback supplies the include and link flags.
+FLTK 1.3 is rejected at configure time because the frontend uses the
+`fl_rounded_rect()` drawing API added in 1.4.
 
 The independent options `ZEALFS_BUILD_GUI`, `ZEALFS_BUILD_CLI`, and `ZEALFS_BUILD_TESTS` default to `ON`. The GUI executable remains `zeal_disk_tool`; the CLI is `zdt` (`.exe` on Windows). Version headers, dependencies, icons and packages stay under the build directory.
 
-Install FLTK with your platform's package manager or build it from source. On Debian/Ubuntu, `sudo apt install libfltk1.3-dev` provides a compatible package; Fedora uses `fltk-devel`; macOS can use `brew install fltk`; MSYS2 UCRT64 uses `pacman -S mingw-w64-ucrt-x86_64-fltk`. Linux GUI builds also need the X11 development libraries that FLTK depends on. See [scripts/ci-linux.sh](../scripts/ci-linux.sh) for the Ubuntu/Debian package list. macOS needs Xcode command-line tools. Windows native builds use MSYS2 UCRT64 GCC, CMake and Ninja.
+Install FLTK 1.4 with your platform's package manager or build it from source. Fedora uses `fltk-devel`; macOS can use `brew install fltk`; MSYS2 UCRT64 uses `pacman -S mingw-w64-ucrt-x86_64-fltk`. Debian bookworm and Ubuntu 22.04 still package FLTK 1.3, so build 1.4 from source there and pass `-DCMAKE_PREFIX_PATH` if it is installed outside the default prefix; [scripts/ci-linux.sh](../scripts/ci-linux.sh) does exactly that, and lists the needed X11 development packages. macOS needs Xcode command-line tools. Windows native builds use MSYS2 UCRT64 GCC, CMake and Ninja.
 
 Native builds on Raspberry Pi use the same CMake commands. Cross-compilation toolchains are provided for `cmake/toolchain-linux-arm32.cmake`, `cmake/toolchain-linux-arm64.cmake`, and `cmake/toolchain-win64.cmake`. GUI cross-builds need FLTK and its X11 dependencies built for the target architecture; point `FLTK_DIR` or `CMAKE_PREFIX_PATH` at the target installation and do not point a cross-build at host libraries. Older Linux/Windows x86 toolchain files remain for legacy users but are outside the supported artifact matrix.
 
 ### GUI implementation
 
-The FLTK frontend lives in [src/gui/](../src/gui/): C++ windows, tables, dialogs and the partition map, plus a plain-C adapter (`model.c`) that wraps the shared API. No third-party GUI code is bundled in this repository; FLTK is an external build dependency with its own license. `Fl_Native_File_Chooser` provides host file dialogs, and `Fl_Table_Row` provides the sortable file list and the partition table.
+The FLTK frontend lives in [src/gui/](../src/gui/) and [include/gui/](../include/gui/): a C++17 single-window shell with a native title bar, a classic menu bar, disk sidebar, partition map, details rail and embedded file browser, plus a plain-C adapter (`model.c`) that wraps the shared API. Its CMake configuration lives in [cmake/gui.cmake](../cmake/gui.cmake). Icons come from [Lucide](https://lucide.dev) (ISC) and are stored as SVG in `packages/icons/lucide/`; `scripts/generate-icons.py` embeds them into `include/ui_icons.h`, and `Fl_SVG_Image` (from FLTK's images library) rasterises and tints them at the requested size. The same script writes `include/app_icon_png.h` with the 256 px application icon used by the About window and embeds the outlined wordmark (`packages/icons/zeal-disk-tool-wordmark.svg`) as `include/app_wordmark.h`; the wordmark outlines were produced from the Righteous typeface with Inkscape and the font itself is not shipped; the generated `include/app_icon.h` supplies the window icon, and `Fl_Native_File_Chooser` provides host file dialogs. FLTK itself remains an external build dependency with its own license.
 
 ## Packages and installation
 
@@ -131,4 +132,4 @@ The repository's [.clang-format](../.clang-format) follows the existing C conven
 clang-format --style=file -i src/cli/args.c
 ```
 
-For changes to existing files, format the edited sections. The `.clang-format-ignore` file excludes the generated application icon (`include/app_icon.h`). Split declarations manually and use trailing commas to keep initializer entries on separate lines.
+For changes to existing files, format the edited sections. The `.clang-format-ignore` file excludes the generated headers (`include/app_icon.h` and `include/ui_icons.h`). Split declarations manually and use trailing commas to keep initializer entries on separate lines.

@@ -23,7 +23,7 @@ Physical disks are written in place. A write/flush failure can leave a partially
 
 **Import** copies a host file into the selected filesystem and stages it. Existing destination files are not overwritten. Use a destination name within the [16-byte name limit](ZEALFS.md#names-and-paths). Importing a host directory recursively is not supported.
 
-**Export** copies filesystem contents to the host immediately, including staged contents. Discarding later does not remove those exported files. The GUI exports selected files; the CLI also [exports directories recursively](CLI.md#export-files-and-directories). Export cannot replace the active image or an alias of it.
+**Export** copies filesystem contents to the host immediately, including staged contents. Discarding later does not remove those exported files. The GUI exports selected files or folders; the CLI also supports filename patterns and [whole-filesystem export](CLI.md#export-files-and-directories). Export cannot replace the active image or an alias of it.
 
 A filesystem export is different from a raw backup:
 
@@ -59,11 +59,11 @@ Protection acquired for merge/restore remains held until the session closes, inc
 
 ## A card is missing from the device list
 
-Discovery lists devices that the current process can open and parse within supported limits. Inaccessible devices are silently skipped. If the GUI selector or `zdt devices` omits a card:
+Discovery lists devices that the current process can open and parse within supported limits. Inaccessible devices are silently skipped. If the GUI sidebar or `zdt devices` omits a card:
 
 1. Check the host inventory above to confirm the OS sees it.
 2. Check permissions; retry discovery from an appropriately elevated process if needed.
 3. Check the [capacity and sector-size limits](ZEALFS.md#capacity-and-allocation).
 4. For a known path, run `zdt -d DEVICE info` to see its specific error instead of relying on discovery.
 
-Refresh the GUI with **File → Refresh devices** after resolving pending changes. In the CLI, each `devices` command performs fresh discovery.
+Refresh the GUI with **Disk → Refresh Devices** (or `F5`) after resolving pending changes. In the CLI, each `devices` command performs fresh discovery.

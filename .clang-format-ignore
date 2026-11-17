@@ -1,3 +1,6 @@
 # Generated image data keeps its generated layout.
 
 include/app_icon.h
+include/app_icon_png.h
+include/app_wordmark.h
+include/ui_icons.h

@@ -1,65 +1,23 @@
 /**
- * SPDX-FileCopyrightText: 2026 David Higgins <zoul0813@me.com>
+ * SPDX-FileCopyrightText: 2026 Zeal 8-bit Computer <contact@zeal8bit.com>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#include "Gui.hpp"
+#include "gui/Utils.hpp"
 
 #include <cstdio>
 #include <cstring>
 
-namespace gui {
+namespace utils {
 
-const Fl_Color background = fl_rgb_color(0xef, 0xf2, 0xf6);
-const Fl_Color panel = fl_rgb_color(0xff, 0xff, 0xff);
-const Fl_Color panel_alt = fl_rgb_color(0xf8, 0xfa, 0xfc);
-const Fl_Color header = fl_rgb_color(0xe8, 0xed, 0xf3);
-const Fl_Color border = fl_rgb_color(0xd3, 0xdb, 0xe5);
-const Fl_Color text = fl_rgb_color(0x1f, 0x29, 0x33);
-const Fl_Color text_muted = fl_rgb_color(0x64, 0x74, 0x8b);
-const Fl_Color accent = fl_rgb_color(0x25, 0x63, 0xeb);
-const Fl_Color accent_soft = fl_rgb_color(0xdb, 0xe8, 0xfe);
-const Fl_Color warning = fl_rgb_color(0xb4, 0x53, 0x09);
-const Fl_Color success = fl_rgb_color(0x15, 0x80, 0x3d);
-const Fl_Color stripe = fl_rgb_color(0xf6, 0xf8, 0xfb);
-const Fl_Color selection = fl_rgb_color(0xdb, 0xe8, 0xfe);
-const Fl_Color selection_text = fl_rgb_color(0x1e, 0x3a, 0x8a);
-
-Fl_Color partition_color(int slot)
-{
-    switch (slot) {
-    case 0:
-        return fl_rgb_color(0x4f, 0xad, 0x4f);
-    case 1:
-        return fl_rgb_color(0x39, 0x5b, 0x7e);
-    case 2:
-        return fl_rgb_color(0x9f, 0x62, 0xb6);
-    case 3:
-        return fl_rgb_color(0xc9, 0x4b, 0x24);
-    default:
-        return fl_rgb_color(0x94, 0xa3, 0xb8);
-    }
-}
-
-std::string format_size(uint64_t bytes)
+std::string format_size(uint64_t bytes, bool bytes_below_kib)
 {
     char buffer[48];
-    disk_get_size_str(bytes, buffer, sizeof(buffer));
-    return buffer;
-}
-
-std::string format_file_size(uint64_t bytes)
-{
-    char buffer[48];
-    if (bytes < KB) {
+    if (bytes_below_kib && bytes < KB) {
         std::snprintf(buffer, sizeof(buffer), "%llu B", (unsigned long long) bytes);
-    } else if (bytes < MB) {
-        std::snprintf(buffer, sizeof(buffer), "%.1f KiB", (double) bytes / (double) KB);
-    } else if (bytes < GB) {
-        std::snprintf(buffer, sizeof(buffer), "%.2f MiB", (double) bytes / (double) MB);
-    } else {
-        std::snprintf(buffer, sizeof(buffer), "%.2f GiB", (double) bytes / (double) GB);
+        return buffer;
     }
+    disk_get_size_str(bytes, buffer, sizeof(buffer));
     return buffer;
 }
 
@@ -153,4 +111,4 @@ bool valid_entry_name(const std::string &name)
     return name.find('/') == std::string::npos && name.find('\\') == std::string::npos;
 }
 
-}  // namespace gui
+}  // namespace utils

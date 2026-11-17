@@ -1,533 +1,317 @@
 /**
- * SPDX-FileCopyrightText: 2026 David Higgins <zoul0813@me.com>
+ * SPDX-FileCopyrightText: 2026 Zeal 8-bit Computer <contact@zeal8bit.com>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-#include "MainWindow.hpp"
+#include "gui/MainWindow.hpp"
 
 #include <FL/Fl.H>
+#include <FL/Fl_Menu_Bar.H>
+#include <FL/Fl_Menu_Item.H>
 #include <FL/Fl_Native_File_Chooser.H>
-#include <FL/Fl_Table_Row.H>
 #include <FL/fl_ask.H>
 #include <FL/fl_draw.H>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
-#include <cstring>
 #include <string>
 
 #include "app_version.h"
-#include "BrowserWindow.hpp"
-#include "Dialogs.hpp"
-#include "Gui.hpp"
-#include "PartitionBar.hpp"
+#include "gui/DetailsPanel.hpp"
+#include "gui/Dialogs.hpp"
+#include "gui/DiskMapPanel.hpp"
+#include "gui/FileBrowserPanel.hpp"
+#include "gui/ModernStyle.hpp"
+#include "gui/SidebarPanel.hpp"
+#include "gui/Utils.hpp"
 
-/* Partition table, one row per active slot. */
-class PartitionTable : public Fl_Table_Row {
+/* Rounded highlight and a hairline border for the menu popups: the stock
+ * FLTK boxtypes are square and beveled. */
+static void draw_round_selection(int x, int y, int w, int h, Fl_Color color)
+{
+    fl_color(color);
+    fl_rounded_rectf(x, y, w, h, 6);
+}
+
+static void draw_menu_panel(int x, int y, int w, int h, Fl_Color)
+{
+    fl_color(FL_WHITE);
+    fl_rectf(x, y, w, h);
+    fl_color(modern::color(modern::kDivider));
+    fl_rect(x, y, w, h);
+}
+
+static Fl_Boxtype menu_selection_box()
+{
+    static Fl_Boxtype type = FL_NO_BOX;
+    if (type == FL_NO_BOX) {
+        type = (Fl_Boxtype) (FL_FREE_BOXTYPE + 1);
+        Fl::set_boxtype(type, draw_round_selection, 0, 0, 0, 0);
+    }
+    return type;
+}
+
+static Fl_Boxtype menu_panel_box()
+{
+    static Fl_Boxtype type = FL_NO_BOX;
+    if (type == FL_NO_BOX) {
+        type = (Fl_Boxtype) (FL_FREE_BOXTYPE + 2);
+        Fl::set_boxtype(type, draw_menu_panel, 1, 1, 2, 2);
+    }
+    return type;
+}
+
+/* FLTK draws menu popups with the active scheme's colours (a grey panel under
+ * gtk+). Temporarily disabling the scheme while a menu is open gives the flat
+ * white panel set by `color()`, while the rest of the UI keeps its scheme. */
+class ModernMenuBar : public Fl_Menu_Bar {
 public:
-    PartitionTable(int x, int y, int w, int h, MainWindow *owner) : Fl_Table_Row(x, y, w, h), owner_(owner)
+    ModernMenuBar(int x, int y, int w, int h) : Fl_Menu_Bar(x, y, w, h) {}
+
+    int handle(int event) override
     {
-        color(gui::panel);
-        box(FL_DOWN_BOX);
-        selection_color(gui::selection);
-        col_header(1);
-        col_header_height(28);
-        col_resize(1);
-        row_header(0);
-        row_height_all(32);
-        cols(5);
-        for (int column = 0; column < 5; ++column) {
-            col_width(column, column == 1 ? 200 : 110);
+        if (event != FL_PUSH && event != FL_SHORTCUT) {
+            return Fl_Menu_Bar::handle(event);
         }
-        col_width(0, 46);
-        type(SELECT_SINGLE);
-        when(FL_WHEN_RELEASE | FL_WHEN_CHANGED);
-        callback(table_cb, this);
-        rows(0);
-        end();
+        const char *scheme = Fl::scheme();
+        Fl::scheme(nullptr);
+        const int result = Fl_Menu_Bar::handle(event);
+        Fl::scheme(scheme);
+        return result;
     }
-
-    void refresh()
-    {
-        slots_.clear();
-        usage_.clear();
-        disk_info_t *disk = owner_->current_disk();
-        if (disk != nullptr && disk->valid) {
-            for (int slot = 0; slot < MAX_PART_COUNT; ++slot) {
-                const partition_t &part = disk->staged_partitions[slot];
-                if (!part.active || part.size_sectors == 0) {
-                    continue;
-                }
-                int percent = -1;
-                if (part.type == ZEALFS_TYPE) {
-                    uint64_t used = 0;
-                    uint64_t total = 0;
-                    if (disk_fs_usage(disk, slot, &used, &total) == 0) {
-                        percent = gui::percent_of(used, total);
-                    }
-                }
-                slots_.push_back(slot);
-                usage_.push_back(percent);
-            }
-        }
-        rows((int) slots_.size());
-        row_height_all(32);
-        update_column_widths();
-        select_slot(owner_->selected_slot());
-        redraw();
-    }
-
-    void select_slot(int slot)
-    {
-        /* In SELECT_SINGLE mode, selecting the wanted row clears the others.
-         * Clearing them explicitly afterwards would clear the wanted row too. */
-        bool found = false;
-        for (int row = 0; row < (int) slots_.size(); ++row) {
-            if (slots_[row] == slot) {
-                select_row(row, 1);
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            select_all_rows(0);
-        }
-        redraw();
-    }
-
-    void resize(int x, int y, int w, int h)
-    {
-        Fl_Table_Row::resize(x, y, w, h);
-        update_column_widths();
-    }
-
-    int handle(int event)
-    {
-        if (event == FL_PUSH && Fl::event_button() == FL_LEFT_MOUSE && Fl::event_clicks() > 0) {
-            const int row = row_at(Fl::event_y());
-            if (row >= 0 && row < (int) slots_.size()) {
-                owner_->select_partition(slots_[row]);
-                owner_->open_browser();
-                return 1;
-            }
-        }
-        return Fl_Table_Row::handle(event);
-    }
-
-protected:
-    void draw_cell(TableContext context, int R, int C, int X, int Y, int W, int H)
-    {
-        static const char *headers[] = {"#", "Filesystem", "Start address", "Size", "Usage"};
-
-        if (context == CONTEXT_COL_HEADER) {
-            fl_push_clip(X, Y, W, H);
-            fl_color(gui::header);
-            fl_rectf(X, Y, W, H);
-            fl_color(gui::border);
-            fl_line(X, Y + H - 1, X + W, Y + H - 1);
-            if (R == 0 && C >= 0 && C < 5) {
-                fl_font(FL_HELVETICA_BOLD, 11);
-                fl_color(gui::text_muted);
-                fl_draw(headers[C], X + 10, Y, W - 20, H, FL_ALIGN_LEFT | FL_ALIGN_CLIP);
-            }
-            fl_pop_clip();
-            return;
-        }
-        if (context != CONTEXT_CELL) {
-            return;
-        }
-
-        disk_info_t *disk = owner_->current_disk();
-        if (disk == nullptr || R < 0 || R >= (int) slots_.size()) {
-            return;
-        }
-        const int slot = slots_[R];
-        const partition_t &part = disk->staged_partitions[slot];
-        const bool selected = row_selected(R) != 0;
-        const Fl_Color background = selected ? gui::selection : (R % 2 != 0 ? gui::panel_alt : gui::panel);
-
-        fl_push_clip(X, Y, W, H);
-        fl_color(background);
-        fl_rectf(X, Y, W, H);
-        fl_color(gui::border);
-        fl_line(X, Y + H - 1, X + W, Y + H - 1);
-        if (selected && C == 0) {
-            fl_color(gui::accent);
-            fl_rectf(X, Y, 3, H);
-        }
-
-        char buffer[128];
-        fl_font(FL_HELVETICA, 12);
-        fl_color(selected ? gui::selection_text : gui::text);
-        switch (C) {
-        case 0:
-            fl_color(gui::partition_color(slot));
-            fl_rounded_rectf(X + 10, Y + (H - 14) / 2, 14, 14, 3);
-            std::snprintf(buffer, sizeof(buffer), "%d", slot);
-            fl_color(selected ? gui::selection_text : gui::text);
-            fl_draw(buffer, X + 30, Y, W - 34, H, FL_ALIGN_LEFT | FL_ALIGN_CLIP);
-            break;
-        case 1:
-            fl_draw(disk_get_fs_type(part.type), X + 10, Y, W - 16, H, FL_ALIGN_LEFT | FL_ALIGN_CLIP);
-            break;
-        case 2:
-            std::snprintf(buffer,
-                          sizeof(buffer),
-                          "0x%08llX",
-                          (unsigned long long) part.start_lba * (unsigned long long) DISK_SECTOR_SIZE);
-            fl_draw(buffer, X + 10, Y, W - 16, H, FL_ALIGN_LEFT | FL_ALIGN_CLIP);
-            break;
-        case 3: {
-            char size[32];
-            disk_get_size_str((uint64_t) part.size_sectors * DISK_SECTOR_SIZE, size, sizeof(size));
-            fl_draw(size, X + 10, Y, W - 16, H, FL_ALIGN_LEFT | FL_ALIGN_CLIP);
-            break;
-        }
-        case 4: {
-            if (usage_[R] >= 0) {
-                std::snprintf(buffer, sizeof(buffer), "%d%%", usage_[R]);
-                fl_draw(buffer, X + 6, Y, W - 16, H, FL_ALIGN_RIGHT | FL_ALIGN_CLIP);
-            } else {
-                fl_color(gui::text_muted);
-                fl_draw("-", X + 6, Y, W - 16, H, FL_ALIGN_RIGHT | FL_ALIGN_CLIP);
-            }
-            break;
-        }
-        default:
-            break;
-        }
-        fl_pop_clip();
-    }
-
-private:
-    void update_column_widths()
-    {
-        col_width(1, std::max(150, w() - 46 - 110 - 110 - 86 - 12));
-        col_width(2, 110);
-        col_width(3, 110);
-        col_width(4, 86);
-    }
-
-    int row_at(int py)
-    {
-        for (int row = 0; row < rows(); ++row) {
-            int x = 0;
-            int y = 0;
-            int w = 0;
-            int h = 0;
-            if (find_cell(CONTEXT_CELL, row, 0, x, y, w, h) == 0 && py >= y && py < y + h) {
-                return row;
-            }
-        }
-        return -1;
-    }
-
-    static void table_cb(Fl_Widget *widget, void *)
-    {
-        auto *table = static_cast<PartitionTable *>(widget);
-        if (table->owner_->updating()) {
-            return;
-        }
-        const TableContext context = table->callback_context();
-        if (context != CONTEXT_CELL && context != CONTEXT_ROW_HEADER) {
-            return;
-        }
-        const int row = table->callback_row();
-        if (row >= 0 && row < (int) table->slots_.size()) {
-            table->owner_->select_partition(table->slots_[row]);
-        }
-    }
-
-    MainWindow *owner_;
-    std::vector<int> slots_;
-    std::vector<int> usage_;
 };
 
-namespace {
-
-/* Enable or disable a widget from a condition. */
-void set_enabled(Fl_Widget *widget, bool active)
-{
-    if (active) {
-        widget->activate();
-    } else {
-        widget->deactivate();
-    }
-}
-
-
-
-constexpr int kMenuHeight = 26;
-constexpr int kToolbarHeight = 46;
-constexpr int kStatusHeight = 28;
-constexpr int kBarHeight = 96;
-constexpr int kPanelWidth = 268;
-
-void cb_open_image(Fl_Widget *, void *data)
-{
-    static_cast<MainWindow *>(data)->open_image();
-}
-
-void cb_new_image(Fl_Widget *, void *data)
-{
-    static_cast<MainWindow *>(data)->new_image();
-}
-
-void cb_refresh_devices(Fl_Widget *, void *data)
-{
-    static_cast<MainWindow *>(data)->refresh_devices();
-}
-
-void cb_apply(Fl_Widget *, void *data)
-{
-    static_cast<MainWindow *>(data)->apply_changes();
-}
-
-void cb_cancel(Fl_Widget *, void *data)
-{
-    static_cast<MainWindow *>(data)->cancel_changes();
-}
-
-void cb_quit(Fl_Widget *, void *data)
-{
-    auto *window = static_cast<MainWindow *>(data);
-    if (window->confirm_quit()) {
-        window->hide();
-    }
-}
-
-void cb_create_mbr(Fl_Widget *, void *data)
-{
-    static_cast<MainWindow *>(data)->create_mbr();
-}
-
-void cb_new_partition(Fl_Widget *, void *data)
-{
-    static_cast<MainWindow *>(data)->new_partition();
-}
-
-void cb_delete_partition(Fl_Widget *, void *data)
-{
-    static_cast<MainWindow *>(data)->delete_partition();
-}
-
-void cb_format_partition(Fl_Widget *, void *data)
-{
-    static_cast<MainWindow *>(data)->format_partition();
-}
-
-void cb_browse(Fl_Widget *, void *data)
-{
-    static_cast<MainWindow *>(data)->open_browser();
-}
-
-void cb_about(Fl_Widget *, void *data)
-{
-    static_cast<MainWindow *>(data)->show_about();
-}
-
-void window_close_cb(Fl_Widget *, void *data)
-{
-    auto *window = static_cast<MainWindow *>(data);
-    if (window->confirm_quit()) {
-        window->hide();
-    }
-}
-
-void model_status_cb(const char *message, void *user)
-{
-    static_cast<MainWindow *>(user)->set_status(message);
-}
-
-}  // namespace
-
 MainWindow::MainWindow(const std::vector<std::string> &images)
-    : Fl_Double_Window(1060, 700, "Zeal Disk Tool"), image_paths_(images)
+    : Fl_Double_Window(1440, 900, "Zeal Disk Tool"), image_paths_(images)
 {
-    color(gui::background);
+    box(FL_NO_BOX);
+    color(modern::color(modern::kWindow));
+
     begin();
-
-    menu_ = new Fl_Menu_Bar(0, 0, w(), kMenuHeight);
+    menu_ = new ModernMenuBar(0, 0, w(), 26);
     menu_->box(FL_FLAT_BOX);
-    menu_->color(gui::header);
-    menu_->textcolor(gui::text);
-    menu_->selection_color(gui::accent);
+    menu_->color(modern::color(modern::kTitleBg));
+    menu_->textcolor(modern::color(modern::kDark2));
     menu_->textsize(12);
-    menu_->textfont(FL_HELVETICA);
-    menu_->add("&File/&Open image...", FL_COMMAND + 'o', cb_open_image, this);
-    menu_->add("&File/C&reate image...", FL_COMMAND + 'n', cb_new_image, this, FL_MENU_DIVIDER);
-    menu_->add("&File/&Refresh devices", FL_F + 5, cb_refresh_devices, this, FL_MENU_DIVIDER);
-    menu_->add("&File/&Apply changes", FL_COMMAND + 's', cb_apply, this);
-    menu_->add("&File/Cancel changes", 0, cb_cancel, this, FL_MENU_DIVIDER);
-    menu_->add("&File/&Quit", FL_COMMAND + 'q', cb_quit, this);
-    menu_->add("&Partition/Create &MBR", 0, cb_create_mbr, this);
-    menu_->add("&Partition/&New partition", FL_COMMAND + 'p', cb_new_partition, this);
-    menu_->add("&Partition/&Delete partition", FL_Delete, cb_delete_partition, this);
-    menu_->add("&Partition/&Format partition", 0, cb_format_partition, this, FL_MENU_DIVIDER);
-    menu_->add("&Partition/&Browse files", FL_COMMAND + 'b', cb_browse, this);
-    menu_->add("&Help/&About Zeal Disk Tool", 0, cb_about, this);
-
-    toolbar_bg_ = new Fl_Box(0, kMenuHeight, w(), kToolbarHeight);
-    toolbar_bg_->box(FL_FLAT_BOX);
-    toolbar_bg_->color(gui::panel);
-
-    btn_mbr_ = new Fl_Button(0, 0, 0, 0, "Create MBR");
-    btn_new_partition_ = new Fl_Button(0, 0, 0, 0, "New partition");
-    btn_delete_ = new Fl_Button(0, 0, 0, 0, "Delete");
-    btn_format_ = new Fl_Button(0, 0, 0, 0, "Format");
-    for (Fl_Button *button : {btn_mbr_, btn_new_partition_, btn_delete_, btn_format_}) {
-        button->labelsize(12);
-        button->box(FL_UP_BOX);
-    }
-    btn_mbr_->callback(cb_create_mbr, this);
-    btn_new_partition_->callback(cb_new_partition, this);
-    btn_delete_->callback(cb_delete_partition, this);
-    btn_format_->callback(cb_format_partition, this);
-    btn_mbr_->tooltip("Stage a partition table on this disk");
-    btn_new_partition_->tooltip("Stage a new ZealFS v2 partition");
-    btn_delete_->tooltip("Stage the removal of the selected partition");
-    btn_format_->tooltip("Stage formatting the selected partition as ZealFS v2");
-
-    disk_caption_ = new Fl_Box(0, 0, 0, 0, "Disk:");
-    disk_caption_->align(FL_ALIGN_RIGHT | FL_ALIGN_INSIDE);
-    disk_caption_->labelsize(12);
-    disk_caption_->labelcolor(gui::text_muted);
-
-    disk_choice_ = new Fl_Choice(0, 0, 0, 0);
-    disk_choice_->labelsize(12);
-    disk_choice_->callback(disk_choice_cb, this);
-
-    summary_ = new Fl_Box(FL_NO_BOX, 0, 0, 0, 0, "");
-    summary_->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE | FL_ALIGN_CLIP);
-    summary_->labelsize(11);
-    summary_->labelcolor(gui::text_muted);
-
-    staged_ = new Fl_Box(FL_NO_BOX, 0, 0, 0, 0, "");
-    staged_->align(FL_ALIGN_RIGHT | FL_ALIGN_INSIDE | FL_ALIGN_CLIP);
-    staged_->labelsize(11);
-    staged_->labelfont(FL_HELVETICA_BOLD);
-
-    bar_ = new PartitionBar(0, 0, 0, 0);
-    bar_->on_select = [this](int slot) { select_partition(slot); };
-    bar_->on_activate = [this](int slot) {
-        select_partition(slot);
-        open_browser();
-    };
-
-    partition_heading_ = new Fl_Box(FL_NO_BOX, 0, 0, 0, 0, "PARTITIONS");
-    partition_heading_->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE | FL_ALIGN_CLIP);
-    partition_heading_->labelsize(10);
-    partition_heading_->labelfont(FL_HELVETICA_BOLD);
-    partition_heading_->labelcolor(gui::text_muted);
-
-    table_ = new PartitionTable(0, 0, 0, 0, this);
-
-    panel_ = new Fl_Box(0, 0, 0, 0, "");
-    panel_->box(FL_BORDER_BOX);
-    panel_->color(gui::panel);
-    panel_->align(FL_ALIGN_INSIDE);
-
-    panel_heading_ = new Fl_Box(FL_NO_BOX, 0, 0, 0, 0, "SELECTED PARTITION");
-    panel_heading_->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE | FL_ALIGN_CLIP);
-    panel_heading_->labelsize(10);
-    panel_heading_->labelfont(FL_HELVETICA_BOLD);
-    panel_heading_->labelcolor(gui::text_muted);
-
-    panel_chip_ = new Fl_Box(FL_FLAT_BOX, 0, 0, 0, 0, "");
-    details_ = new Fl_Box(FL_NO_BOX, 0, 0, 0, 0, "");
-    details_->align(FL_ALIGN_TOP_LEFT | FL_ALIGN_INSIDE | FL_ALIGN_CLIP);
-    details_->labelsize(12);
-    details_->labelcolor(gui::text);
-
-    usage_caption_ = new Fl_Box(FL_NO_BOX, 0, 0, 0, 0, "USAGE");
-    usage_caption_->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE | FL_ALIGN_CLIP);
-    usage_caption_->labelsize(10);
-    usage_caption_->labelfont(FL_HELVETICA_BOLD);
-    usage_caption_->labelcolor(gui::text_muted);
-
-    usage_ = new Fl_Progress(0, 0, 0, 0);
-    usage_->minimum(0);
-    usage_->maximum(100);
-    usage_->value(0);
-    usage_->box(FL_DOWN_BOX);
-    usage_->color(gui::panel_alt);
-    usage_->selection_color(gui::accent);
-    usage_->labelsize(10);
-    usage_->labelcolor(gui::text);
-
-    panel_disk_heading_ = new Fl_Box(FL_NO_BOX, 0, 0, 0, 0, "DISK");
-    panel_disk_heading_->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE | FL_ALIGN_CLIP);
-    panel_disk_heading_->labelsize(10);
-    panel_disk_heading_->labelfont(FL_HELVETICA_BOLD);
-    panel_disk_heading_->labelcolor(gui::text_muted);
-
-    panel_disk_ = new Fl_Box(FL_NO_BOX, 0, 0, 0, 0, "");
-    panel_disk_->align(FL_ALIGN_TOP_LEFT | FL_ALIGN_INSIDE | FL_ALIGN_CLIP);
-    panel_disk_->labelsize(12);
-    panel_disk_->labelcolor(gui::text);
-
-    btn_browse_ = new Fl_Button(0, 0, 0, 0, "Browse files...");
-    btn_browse_->labelsize(12);
-    btn_browse_->callback(cb_browse, this);
-    btn_browse_->tooltip("Open the file browser for this partition");
-
-    btn_panel_format_ = new Fl_Button(0, 0, 0, 0, "Format");
-    btn_panel_format_->labelsize(12);
-    btn_panel_format_->callback(cb_format_partition, this);
-    btn_panel_delete_ = new Fl_Button(0, 0, 0, 0, "Delete");
-    btn_panel_delete_->labelsize(12);
-    btn_panel_delete_->callback(cb_delete_partition, this);
-
-    status_ = new Fl_Box(FL_FLAT_BOX, 0, 0, 0, 0, "");
-    status_->color(gui::panel);
-    status_->align(FL_ALIGN_LEFT | FL_ALIGN_INSIDE | FL_ALIGN_CLIP);
-    status_->labelsize(12);
-    status_->labelcolor(gui::text_muted);
-
+    menu_->menu_box(menu_panel_box());
+    menu_->down_box(menu_selection_box());
+    menu_->selection_color(modern::color(modern::kSelection));
+    Fl::menu_linespacing(8);
+    build_menu();
+    sidebar_ = new SidebarPanel(0, 0, 10, 10);
+    map_ = new DiskMapPanel(0, 0, 10, 10);
+    details_ = new DetailsPanel(0, 0, 10, 10);
+    files_ = new FileBrowserPanel(0, 0, 10, 10, this);
+    apply_button_ = new modern::ModernButton(0, 0, 110, 18, "Apply changes", true);
+    apply_button_->callback(apply_cb, this);
+    apply_button_->tooltip("Write all pending changes (Ctrl+S)");
+    apply_button_->deactivate();
     end();
 
-    size_range(900, 560);
+    size_range(1024, 640);
     callback(window_close_cb, this);
-    layout_children();
+
+    sidebar_->on_select = [this](int disk, int slot) { select_disk(disk, slot); };
+    sidebar_->on_add = [this](int screen_x, int screen_y) { show_create_menu(screen_x, screen_y); };
+    map_->on_select = [this](int slot) { select_partition(slot); };
+    details_->on_select = [this](int slot) { select_partition(slot); };
+    details_->on_action = [this](DetailsPanel::Action action) {
+        switch (action) {
+        case DetailsPanel::Action::Format:
+            format_partition();
+            break;
+        case DetailsPanel::Action::Delete:
+            delete_partition();
+            break;
+        case DetailsPanel::Action::Properties:
+            show_properties();
+            break;
+        }
+    };
 
     disk_set_status_fn(model_status_cb, this);
-    rebuild_disk_choice();
+    layout_children();
     refresh_views();
     set_status("Ready");
+}
+
+void MainWindow::build_menu()
+{
+    /* FLTK menu items only carry a void*; the small MenuAction enum travels
+     * through it with an intptr_t round-trip. */
+    const auto data = [](MenuAction action) {
+        return reinterpret_cast<void *>(static_cast<intptr_t>(action));
+    };
+
+    menu_->add("&File/&Open Image...", FL_COMMAND + 'o', menu_cb, data(MenuAction::OpenImage));
+    menu_->add("&File/Create &Image...", FL_COMMAND + 'n', menu_cb, data(MenuAction::CreateImage),
+               FL_MENU_DIVIDER);
+    menu_->add("&File/&Apply Changes", FL_COMMAND + 's', menu_cb, data(MenuAction::ApplyChanges));
+    menu_->add("&File/&Discard Changes", 0, menu_cb, data(MenuAction::DiscardChanges), FL_MENU_DIVIDER);
+    menu_->add("&File/&Quit", FL_COMMAND + 'q', menu_cb, data(MenuAction::Quit));
+
+    menu_->add("&Disk/&Refresh Devices", FL_F + 5, menu_cb, data(MenuAction::RefreshDevices), FL_MENU_DIVIDER);
+    menu_->add("&Disk/&New Partition...", FL_COMMAND + 'p', menu_cb, data(MenuAction::NewPartition));
+    menu_->add("&Disk/Create &MBR...", 0, menu_cb, data(MenuAction::CreateMbr), FL_MENU_DIVIDER);
+    menu_->add("&Disk/&Format Partition...", 0, menu_cb, data(MenuAction::FormatPartition));
+    menu_->add("&Disk/&Delete Partition...", FL_Delete, menu_cb, data(MenuAction::DeletePartition),
+               FL_MENU_DIVIDER);
+    menu_->add("&Disk/&Properties...", 0, menu_cb, data(MenuAction::Properties));
+
+    menu_->add("&Edit/&Import Files...", FL_COMMAND + 'i', menu_cb, data(MenuAction::ImportFiles));
+    menu_->add("&Edit/&Export Selection...", FL_COMMAND + 'e', menu_cb, data(MenuAction::ExportSelection));
+    menu_->add("&Edit/&New Folder...", 0, menu_cb, data(MenuAction::NewFolder));
+    menu_->add("&Edit/&Delete...", 0, menu_cb, data(MenuAction::DeleteEntry), FL_MENU_DIVIDER);
+    menu_->add("&Edit/&Focus File List", FL_COMMAND + 'b', menu_cb, data(MenuAction::FocusBrowser));
+    menu_->add("&Edit/F&ind...", FL_COMMAND + 'f', menu_cb, data(MenuAction::FocusSearch));
+
+    menu_->add("&Help/&Keyboard Shortcuts", 0, menu_cb, data(MenuAction::Shortcuts));
+    menu_->add("&Help/&About Zeal Disk Tool", 0, menu_cb, data(MenuAction::About));
+}
+
+void MainWindow::perform_menu_action(MenuAction action)
+{
+    switch (action) {
+    case MenuAction::OpenImage:
+        open_image();
+        break;
+    case MenuAction::CreateImage:
+        new_image();
+        break;
+    case MenuAction::ApplyChanges:
+        apply_changes();
+        break;
+    case MenuAction::DiscardChanges:
+        cancel_changes();
+        break;
+    case MenuAction::Quit:
+        if (confirm_quit()) {
+            hide();
+        }
+        break;
+    case MenuAction::RefreshDevices:
+        refresh_devices();
+        break;
+    case MenuAction::NewPartition:
+        new_partition();
+        break;
+    case MenuAction::CreateMbr:
+        create_mbr();
+        break;
+    case MenuAction::FormatPartition:
+        format_partition();
+        break;
+    case MenuAction::DeletePartition:
+        delete_partition();
+        break;
+    case MenuAction::Properties:
+        show_properties();
+        break;
+    case MenuAction::ImportFiles:
+        files_->action_import();
+        break;
+    case MenuAction::ExportSelection:
+        files_->action_export();
+        break;
+    case MenuAction::NewFolder:
+        files_->action_new_folder();
+        break;
+    case MenuAction::DeleteEntry:
+        files_->action_delete();
+        break;
+    case MenuAction::FocusBrowser:
+        files_->focus_list();
+        break;
+    case MenuAction::FocusSearch:
+        files_->focus_search();
+        break;
+    case MenuAction::Shortcuts:
+        show_shortcuts();
+        break;
+    case MenuAction::About:
+        show_about();
+        break;
+    }
+}
+
+void MainWindow::set_menu_enabled(const char *path, bool enabled)
+{
+    if (menu_ == nullptr) {
+        return;
+    }
+    const Fl_Menu_Item *item = menu_->find_item(path);
+    if (item == nullptr) {
+        return;
+    }
+    const int index = (int) (item - menu_->menu());
+    if (index < 0 || index >= menu_->size()) {
+        return;
+    }
+    const int divider = menu_->mode(index) & FL_MENU_DIVIDER;
+    menu_->mode(index, divider | (enabled ? 0 : FL_MENU_INACTIVE));
+}
+
+void MainWindow::update_menu_states()
+{
+    disk_info_t *disk = current_disk();
+    const int slot = selected_slot();
+    const bool active = disk != nullptr && slot >= 0 && slot < MAX_PART_COUNT && disk->partitions[slot].active;
+    const bool pending = disk != nullptr && disk->has_staged_changes;
+    const bool valid = disk != nullptr && disk->valid;
+    const bool can_partition = valid && disk->free_part_idx >= 0;
+    const bool can_mbr =
+        valid && !disk->has_mbr && !disk->has_staged_changes && !disk->partitions[0].active;
+    const bool browser = files_ != nullptr && files_->has_target();
+    const bool selection = files_ != nullptr && files_->has_selection();
+
+    set_menu_enabled("&File/&Apply Changes", pending);
+    set_menu_enabled("&File/&Discard Changes", pending);
+    set_menu_enabled("&Disk/&New Partition...", can_partition);
+    set_menu_enabled("&Disk/Create &MBR...", can_mbr);
+    set_menu_enabled("&Disk/&Format Partition...", active);
+    set_menu_enabled("&Disk/&Delete Partition...", active);
+    set_menu_enabled("&Disk/&Properties...", disk != nullptr);
+    set_menu_enabled("&Edit/&Import Files...", browser);
+    set_menu_enabled("&Edit/&Export Selection...", browser && selection);
+    set_menu_enabled("&Edit/&New Folder...", browser);
+    set_menu_enabled("&Edit/&Delete...", browser && selection);
+    set_menu_enabled("&Edit/&Focus File List", browser);
+    set_menu_enabled("&Edit/F&ind...", browser);
 }
 
 MainWindow::~MainWindow()
 {
     disk_set_status_fn(nullptr, nullptr);
-    delete browser_;
-    browser_ = nullptr;
 }
 
 void MainWindow::initialize()
 {
     disks_refresh();
     int selected = state()->selected_disk;
-    std::string open_error;
     for (const std::string &path : image_paths_) {
         const int index = disk_open_image_file_path(state(), path.c_str());
         if (index >= 0) {
             selected = index;
         } else {
-            open_error = status_text_;
+            open_error_ = status_text_;
         }
     }
-    state()->selected_disk = selected;
-    if (selected < 0 && state()->disk_count > 0) {
-        state()->selected_disk = 0;
-    }
-    state()->selected_partition = -1;
+    state()->selected_disk = selected >= 0 ? selected : (state()->disk_count > 0 ? 0 : -1);
+    /* Opening or refreshing keeps the previous convenience of landing on a
+     * partition; only clicking a disk header switches to the overview. */
+    state()->selected_partition = default_partition_slot();
     model_changed();
-    if (!open_error.empty()) {
-        set_status(open_error.c_str());
+    if (!open_error_.empty()) {
+        set_status(open_error_.c_str());
     } else if (state()->disk_count == 0) {
-        set_status("No disks detected. Use File > Open image... to load a disk image.");
+        set_status("No disks detected. Use + to open or create a disk image.");
+    } else if (state()->selected_partition >= 0) {
+        char message[48];
+        std::snprintf(message, sizeof(message), "Partition %d selected", state()->selected_partition);
+        set_status(message);
     } else {
-        set_status("Select a partition to manage its files; press Ctrl+B to browse it.");
+        set_status("Select a partition to browse its files.");
     }
 }
 
@@ -536,24 +320,71 @@ disk_info_t *MainWindow::current_disk()
     return disk_get_current(state());
 }
 
-int MainWindow::selected_slot()
+int MainWindow::selected_slot() const
 {
-    return state()->selected_partition;
+    return disk_get_state()->selected_partition;
 }
 
 void MainWindow::set_status(const char *message)
 {
     status_text_ = message != nullptr ? message : "";
-    if (status_ != nullptr) {
-        status_->copy_label(("  " + status_text_).c_str());
-        status_->redraw();
+    redraw();
+}
+
+int MainWindow::default_partition_slot() const
+{
+    disk_info_t *disk = disk_get_current(disk_get_state());
+    if (disk == nullptr || !disk->valid) {
+        return -1;
     }
+    for (int slot = 0; slot < MAX_PART_COUNT; ++slot) {
+        if (disk_is_valid_zealfs_partition(&disk->partitions[slot])) {
+            return slot;
+        }
+    }
+    for (int slot = 0; slot < MAX_PART_COUNT; ++slot) {
+        if (disk->partitions[slot].active) {
+            return slot;
+        }
+    }
+    return -1;
+}
+
+void MainWindow::select_disk(int disk_index, int slot)
+{
+    if (disk_index < 0 || disk_index >= state()->disk_count) {
+        return;
+    }
+    disk_info_t *current = current_disk();
+    if (state()->selected_disk != disk_index && !disk_can_be_switched(current)) {
+        fl_alert("The current disk has unsaved changes.\nApply or cancel them before switching disks.");
+        refresh_views();
+        return;
+    }
+    state()->selected_disk = disk_index;
+    if (slot >= 0 && slot < MAX_PART_COUNT && state()->disks[disk_index].partitions[slot].active) {
+        state()->selected_partition = slot;
+    } else {
+        /* Clicking the disk header shows the disk overview: every partition
+         * stays visible in the map, none is selected. */
+        state()->selected_partition = -1;
+    }
+    if (state()->selected_partition >= 0) {
+        char message[64];
+        std::snprintf(message, sizeof(message), "Partition %d selected", state()->selected_partition);
+        set_status(message);
+    } else {
+        char message[64];
+        std::snprintf(message, sizeof(message), "Disk %d selected", disk_index);
+        set_status(message);
+    }
+    refresh_views();
 }
 
 void MainWindow::select_partition(int slot)
 {
     disk_info_t *disk = current_disk();
-    if (slot >= 0 && (disk == nullptr || slot >= MAX_PART_COUNT || !disk->partitions[slot].active)) {
+    if (disk == nullptr || slot < 0 || slot >= MAX_PART_COUNT || !disk->partitions[slot].active) {
         slot = -1;
     }
     if (state()->selected_partition == slot) {
@@ -561,32 +392,13 @@ void MainWindow::select_partition(int slot)
     }
     state()->selected_partition = slot;
     if (slot >= 0) {
-        char message[96];
+        char message[64];
         std::snprintf(message, sizeof(message), "Partition %d selected", slot);
         set_status(message);
     } else {
         set_status("No partition selected");
     }
     refresh_views();
-}
-
-int MainWindow::default_partition_slot()
-{
-    disk_info_t *disk = current_disk();
-    if (disk == nullptr || !disk->valid) {
-        return -1;
-    }
-    for (int index = 0; index < MAX_PART_COUNT; ++index) {
-        if (disk_is_valid_zealfs_partition(&disk->partitions[index])) {
-            return index;
-        }
-    }
-    for (int index = 0; index < MAX_PART_COUNT; ++index) {
-        if (disk->partitions[index].active) {
-            return index;
-        }
-    }
-    return -1;
 }
 
 void MainWindow::model_changed()
@@ -597,255 +409,220 @@ void MainWindow::model_changed()
     if (state()->selected_disk < 0 && state()->disk_count > 0) {
         state()->selected_disk = 0;
     }
-    /* Keep the file browser alive across disk/partition changes by selecting
-     * a sensible partition before refreshing every view. */
     disk_info_t *disk = current_disk();
     const int slot = state()->selected_partition;
-    if (disk == nullptr || slot < 0 || slot >= MAX_PART_COUNT || !disk->partitions[slot].active) {
-        state()->selected_partition = default_partition_slot();
+    if (disk == nullptr) {
+        state()->selected_partition = -1;
+    } else if (slot >= MAX_PART_COUNT || (slot >= 0 && !disk->partitions[slot].active)) {
+        state()->selected_partition = -1;
     }
-    rebuild_disk_choice();
     refresh_views();
 }
 
 void MainWindow::refresh_views()
 {
-    if (menu_ == nullptr) {
-        return;
-    }
     updating_ = true;
-
     disk_info_t *disk = current_disk();
     int slot = state()->selected_partition;
-    if (slot >= 0 && (disk == nullptr || slot >= MAX_PART_COUNT || !disk->partitions[slot].active)) {
+    if (disk == nullptr || slot < 0 || slot >= MAX_PART_COUNT || !disk->partitions[slot].active) {
         slot = -1;
-        state()->selected_partition = -1;
     }
+    state()->selected_partition = slot;
 
-    if (disk == nullptr) {
-        summary_->copy_label("No disk selected");
-        summary_->tooltip(nullptr);
-        staged_->copy_label("");
-    } else {
-        char line[ZFS_PATH_MAX + 128];
-        std::snprintf(line,
-                      sizeof(line),
-                      "%s   -   %s   -   %s",
-                      disk->name,
-                      gui::format_size(disk->size_bytes).c_str(),
-                      disk->has_mbr ? "MBR partition table" : "raw ZealFS filesystem");
-        summary_->copy_label(line);
-        summary_->copy_tooltip(disk->path);
-        staged_->copy_label(disk->has_staged_changes ? "UNSAVED CHANGES" : "All changes written");
-        staged_->labelcolor(disk->has_staged_changes ? gui::warning : gui::success);
+    if (sidebar_ != nullptr) {
+        sidebar_->refresh(state(), state()->selected_disk, slot);
     }
-
-    bar_->refresh(disk, slot);
-    table_->refresh();
-
-    char heading[64];
-    int used_slots = 0;
-    if (disk != nullptr) {
-        for (int index = 0; index < MAX_PART_COUNT; ++index) {
-            if (disk->partitions[index].active) {
-                ++used_slots;
-            }
-        }
+    if (map_ != nullptr) {
+        map_->refresh(disk, slot);
     }
-    if (disk == nullptr) {
-        partition_heading_->copy_label("PARTITIONS");
-    } else {
-        std::snprintf(heading, sizeof(heading), "PARTITIONS  (%d of %d slots used)", used_slots, MAX_PART_COUNT);
-        partition_heading_->copy_label(heading);
+    if (details_ != nullptr) {
+        details_->refresh(disk, slot);
     }
-
-    update_details();
+    if (files_ != nullptr) {
+        files_->retarget(disk, slot);
+    }
     update_actions();
-
-    std::string title = "Zeal Disk Tool " VERSION;
-    if (disk != nullptr) {
-        title += " - ";
-        title += disk->name;
-    }
-    copy_label(title.c_str());
-
-    if (browser_ != nullptr && browser_->visible()) {
-        if (disk != nullptr && slot >= 0 && disk_is_valid_zealfs_partition(&disk->partitions[slot])) {
-            browser_->retarget(disk, slot);
-        } else {
-            browser_->hide();
-        }
-    }
-
+    update_window_title();
     updating_ = false;
-}
-
-void MainWindow::update_details()
-{
-    disk_info_t *disk = current_disk();
-    const int slot = state()->selected_partition;
-    char buffer[1024];
-
-    update_disk_panel(disk);
-
-    if (disk == nullptr) {
-        panel_chip_->hide();
-        usage_->value(0);
-        usage_caption_->copy_label("USAGE");
-        details_->copy_label("No disk selected\n\nOpen a disk image with\nFile > Open image...");
-        return;
-    }
-    if (slot < 0 || !disk->partitions[slot].active) {
-        panel_chip_->hide();
-        usage_->value(0);
-        usage_caption_->copy_label("USAGE");
-        details_->copy_label("No partition selected\n\nClick a partition in the map\nor in the table to select it.");
-        return;
-    }
-
-    const partition_t &part = disk->partitions[slot];
-    const uint64_t size_bytes = (uint64_t) part.size_sectors * DISK_SECTOR_SIZE;
-    char size_str[32];
-    disk_get_size_str(size_bytes, size_str, sizeof(size_str));
-
-    uint64_t used = 0;
-    uint64_t total = 0;
-    int percent = 0;
-    int usage_available = part.type == ZEALFS_TYPE ? disk_fs_usage(disk, slot, &used, &total) : -1;
-    if (usage_available == 0) {
-        percent = gui::percent_of(used, total);
-    }
-
-    char free_str[32] = "-";
-    if (usage_available == 0) {
-        disk_get_size_str(total >= used ? total - used : 0, free_str, sizeof(free_str));
-    }
-
-    std::snprintf(buffer,
-                  sizeof(buffer),
-                  "PARTITION %d\n%s\n\n"
-                  "Start address   0x%08llX\n"
-                  "Size            %s\n"
-                  "Usage           %s\n"
-                  "Free            %s\n"
-                  "State           %s",
-                  slot,
-                  disk_get_fs_type(part.type),
-                  (unsigned long long) part.start_lba * (unsigned long long) DISK_SECTOR_SIZE,
-                  size_str,
-                  usage_available == 0 ? (std::to_string(percent) + "%").c_str() : "not available",
-                  free_str,
-                  disk->has_staged_changes ? "unsaved changes" : "written to disk");
-
-    panel_chip_->color(gui::partition_color(slot));
-    panel_chip_->show();
-    panel_chip_->redraw();
-    details_->copy_label(buffer);
-    usage_->value(percent);
-    usage_->selection_color(percent >= 90 ? gui::warning : gui::accent);
-    usage_->redraw();
-    if (usage_available == 0) {
-        char usage_text[40];
-        std::snprintf(usage_text, sizeof(usage_text), "USAGE   %d%% used", percent);
-        usage_caption_->copy_label(usage_text);
-    } else {
-        usage_caption_->copy_label("USAGE   not available");
-    }
-}
-
-void MainWindow::update_disk_panel(disk_info_t *disk)
-{
-    if (panel_disk_ == nullptr) {
-        return;
-    }
-    if (disk == nullptr) {
-        panel_disk_->copy_label("No disk selected");
-        panel_disk_->tooltip(nullptr);
-        return;
-    }
-    int used_slots = 0;
-    for (int index = 0; index < MAX_PART_COUNT; ++index) {
-        if (disk->partitions[index].active) {
-            ++used_slots;
-        }
-    }
-    char slots[64];
-    std::snprintf(slots, sizeof(slots), "%d of %d slots used", used_slots, MAX_PART_COUNT);
-    const std::string text = std::string(disk->name) + "\n" + gui::format_size(disk->size_bytes) + "\n" + slots;
-    panel_disk_->copy_label(text.c_str());
-    panel_disk_->copy_tooltip(disk->path);
+    redraw();
 }
 
 void MainWindow::update_actions()
 {
+    update_window_title();
+    update_menu_states();
+    if (apply_button_ != nullptr) {
+        disk_info_t *disk = current_disk();
+        if (disk != nullptr && disk->has_staged_changes) {
+            apply_button_->activate();
+        } else {
+            apply_button_->deactivate();
+        }
+        apply_button_->redraw();
+    }
+}
+
+void MainWindow::update_window_title()
+{
+    std::string title = "Zeal Disk Tool";
     disk_info_t *disk = current_disk();
-    const int slot = state()->selected_partition;
-    const bool valid_disk = disk != nullptr && disk->valid;
-    const bool pending = disk != nullptr && disk->has_staged_changes;
-    const bool active_partition = valid_disk && slot >= 0 && slot < MAX_PART_COUNT && disk->partitions[slot].active;
-    const bool zealfs_partition =
-        active_partition && disk_is_valid_zealfs_partition(&disk->partitions[slot]);
-
-    set_enabled(btn_mbr_, valid_disk && !disk->has_mbr && !pending && !disk->partitions[0].active);
-    set_enabled(btn_new_partition_, valid_disk && disk->free_part_idx >= 0);
-    set_enabled(btn_delete_, active_partition);
-    set_enabled(btn_format_, active_partition);
-    set_enabled(btn_browse_, zealfs_partition);
-    set_enabled(btn_panel_format_, active_partition);
-    set_enabled(btn_panel_delete_, active_partition);
+    if (disk != nullptr) {
+        title += " - ";
+        title += disk->name;
+        if (disk->has_staged_changes) {
+            title = "*" + title;
+        }
+    }
+    copy_label(title.c_str());
 }
 
-void MainWindow::rebuild_disk_choice()
+void MainWindow::layout_chrome()
 {
-    if (disk_choice_ == nullptr) {
-        return;
+    content_y_ = menu_ != nullptr ? menu_->h() : 0;
+    sidebar_w_ = std::min(280, std::max(180, (int) (w() * 0.17f)));
+    right_w_ = std::min(300, std::max(210, (int) (w() * 0.20f)));
+    gap_ = 14;
+    if (menu_ != nullptr) {
+        menu_->resize(0, 0, w(), menu_->h());
     }
-    disk_choice_->clear();
-    choice_labels_.clear();
-    const int count = state()->disk_count;
-    for (int index = 0; index < count; ++index) {
-        choice_labels_.push_back(state()->disks[index].label);
-        disk_choice_->add(choice_labels_.back().c_str());
-    }
-    if (count == 0) {
-        disk_choice_->add("No disk loaded", 0, nullptr, nullptr, FL_MENU_INACTIVE);
-    }
-    disk_choice_->add("Open image file...");
-    const int selected = state()->selected_disk;
-    disk_choice_->value(selected >= 0 && selected < count ? selected : 0);
 }
 
-void MainWindow::disk_choice_cb(Fl_Widget *, void *data)
+void MainWindow::layout_children()
 {
-    static_cast<MainWindow *>(data)->disk_choice_changed();
+    layout_chrome();
+    if (sidebar_ == nullptr) {
+        return;
+    }
+    const int content_h = std::max(200, h() - content_y_ - status_h_);
+    sidebar_->resize(0, content_y_, sidebar_w_, content_h);
+
+    const int main_x = sidebar_w_ + gap_;
+    const int main_w = w() - main_x - gap_;
+    map_->resize(main_x, content_y_ + 44, main_w, 64);
+
+    const int details_y = content_y_ + 116;
+    const int details_h = 190;
+    details_->set_right_width(right_w_);
+    details_->resize(main_x, details_y, main_w, details_h);
+
+    const int files_y = details_y + details_h + 18;
+    const int files_h = std::max(140, h() - files_y - status_h_ - 6);
+    files_->set_right_width(right_w_);
+    files_->resize(main_x, files_y, main_w, files_h);
+    if (apply_button_ != nullptr) {
+        const int button_w = 120;
+        apply_button_->resize(w() - 14 - button_w, content_y_ + 8, button_w, 26);
+    }
+    redraw();
 }
 
-void MainWindow::disk_choice_changed()
+void MainWindow::resize(int x, int y, int w, int h)
 {
-    if (updating_) {
+    Fl_Double_Window::resize(x, y, w, h);
+    layout_children();
+}
+
+void MainWindow::draw_heading()
+{
+    const int x = sidebar_w_ + gap_;
+    const int y = content_y_ + 10;
+    const int width = w() - x - gap_;
+    disk_info_t *disk = current_disk();
+    if (disk == nullptr) {
+        /* A second line used to sit here, but the disk map card starts right
+         * below the heading and covered it; the sidebar and the empty details
+         * card already explain how to open an image. */
+        modern::text("No disk selected", x, y + 22, modern::color(modern::kDark), 15, true);
         return;
     }
-    const int picked = disk_choice_->value();
-    const int count = state()->disk_count;
-    if (picked < 0) {
+    const int right_edge = apply_button_ != nullptr ? apply_button_->x() - 12 : x + width;
+    const std::string title =
+        "Disk " + std::to_string(state()->selected_disk) + "  \xE2\x80\x94  " + disk->name;
+    modern::text_clipped(title,
+                         x,
+                         y,
+                         std::max(100, right_edge - 420 - 16 - x),
+                         24,
+                         modern::color(disk->valid ? modern::kDark : modern::kWarning),
+                         15,
+                         true);
+    int used_slots = 0;
+    for (int slot = 0; slot < MAX_PART_COUNT; ++slot) {
+        if (disk->partitions[slot].active) {
+            ++used_slots;
+        }
+    }
+    char right[128];
+    std::snprintf(right,
+                  sizeof(right),
+                  "%s  \xC2\xB7  %s  \xC2\xB7  %d of %d slots used",
+                  utils::format_size(disk->size_bytes).c_str(),
+                  disk->has_mbr ? "MBR" : "Raw",
+                  used_slots,
+                  MAX_PART_COUNT);
+    modern::text_clipped(right,
+                         right_edge - 420,
+                         y + 4,
+                         420,
+                         18,
+                         modern::color(modern::kGray),
+                         10,
+                         false,
+                         FL_ALIGN_RIGHT | FL_ALIGN_CLIP);
+}
+
+void MainWindow::draw_statusbar()
+{
+    const int y = h() - status_h_;
+    fl_color(modern::color(modern::kTitleBg));
+    fl_rectf(0, y, w(), status_h_);
+    fl_color(modern::color(modern::kTitleLine));
+    fl_line(0, y, w(), y);
+
+    modern::text_clipped(status_text_, 14, y + 4, w() - 280, 16, modern::color(modern::kGray), 10, false);
+
+    disk_info_t *disk = current_disk();
+    if (disk != nullptr) {
+        const bool pending = disk->has_staged_changes;
+        const char *label = pending ? "Unsaved changes" : "All changes written";
+        const Fl_Color text_color = modern::color(pending ? modern::kWarning : modern::kSuccess);
+        const Fl_Color bg = modern::lighten(text_color, 0.88);
+        const int label_w = modern::text_width(label, 10, false);
+        const int pill_w = label_w + 34;
+        const int pill_x = w() - 14 - pill_w;
+        const int pill_y = y + 3;
+        modern::fill_round(pill_x, pill_y, pill_w, 18, 9, bg);
+        modern::fill_circle(pill_x + 11, pill_y + 9, 3, text_color);
+        modern::text(label, pill_x + 21, pill_y + 13, text_color, 10, false);
+    }
+}
+
+void MainWindow::draw()
+{
+    fl_color(modern::color(modern::kWindow));
+    fl_rectf(0, 0, w(), h());
+    draw_heading();
+    draw_statusbar();
+    Fl_Double_Window::draw();
+}
+
+void MainWindow::refresh_devices()
+{
+    const std::string current_path = current_disk() != nullptr ? std::string(current_disk()->path) : std::string();
+    if (disks_refresh() != ERR_SUCCESS) {
+        model_changed();
         return;
     }
-    if (picked >= count) {
-        rebuild_disk_choice();
-        open_image();
-        return;
+    int selected = state()->disk_count > 0 ? 0 : -1;
+    if (!current_path.empty()) {
+        for (int index = 0; index < state()->disk_count; ++index) {
+            if (current_path == state()->disks[index].path) {
+                selected = index;
+            }
+        }
     }
-    if (picked == state()->selected_disk) {
-        return;
-    }
-    disk_info_t *previous = current_disk();
-    if (!disk_can_be_switched(previous)) {
-        fl_alert("The selected disk has unsaved changes.\nApply or cancel them before switching disks.");
-        rebuild_disk_choice();
-        return;
-    }
-    state()->selected_disk = picked;
-    state()->selected_partition = -1;
+    state()->selected_disk = selected;
+    state()->selected_partition = default_partition_slot();
     model_changed();
 }
 
@@ -866,7 +643,7 @@ void MainWindow::open_image()
     const bool can_select = disk_can_be_switched(previous);
     if (can_select) {
         state()->selected_disk = index;
-        state()->selected_partition = -1;
+        state()->selected_partition = default_partition_slot();
     }
     model_changed();
     if (!can_select) {
@@ -884,29 +661,66 @@ void MainWindow::new_image()
     const bool can_select = disk_can_be_switched(previous);
     if (can_select) {
         state()->selected_disk = index;
-        state()->selected_partition = -1;
+        state()->selected_partition = default_partition_slot();
     }
     model_changed();
     set_status("New image staged. Create partitions, then press Apply to write it.");
 }
 
-void MainWindow::refresh_devices()
+void MainWindow::new_partition()
 {
-    const std::string current_path = current_disk() != nullptr ? std::string(current_disk()->path) : std::string();
-    if (disks_refresh() != ERR_SUCCESS) {
-        refresh_views();
+    int slot = -1;
+    if (!dialog_new_partition(this, &slot)) {
         return;
     }
-    int selected = state()->disk_count > 0 ? 0 : -1;
-    if (!current_path.empty()) {
-        for (int index = 0; index < state()->disk_count; ++index) {
-            if (current_path == state()->disks[index].path) {
-                selected = index;
-            }
-        }
+    if (slot >= 0) {
+        state()->selected_partition = slot;
     }
-    state()->selected_disk = selected;
+    model_changed();
+}
+
+void MainWindow::delete_partition()
+{
+    disk_info_t *disk = current_disk();
+    const int slot = selected_slot();
+    if (disk == nullptr || slot < 0 || !disk->partitions[slot].active) {
+        return;
+    }
+    if (fl_choice("Delete partition %d (%s, %s)?\n"
+                  "The removal is staged until you press Apply.",
+                  "Cancel",
+                  "Delete partition",
+                  nullptr,
+                  slot,
+                  disk_get_fs_type(disk->partitions[slot].type),
+                  utils::format_size((uint64_t) disk->partitions[slot].size_sectors * DISK_SECTOR_SIZE).c_str()) !=
+        1) {
+        return;
+    }
+    disk_delete_partition(disk, slot);
     state()->selected_partition = -1;
+    model_changed();
+}
+
+void MainWindow::format_partition()
+{
+    disk_info_t *disk = current_disk();
+    const int slot = selected_slot();
+    if (disk == nullptr || slot < 0 || !disk->partitions[slot].active) {
+        return;
+    }
+    if (fl_choice("Format partition %d as ZealFS v2?\n"
+                  "Its current contents are replaced when the changes are applied.",
+                  "Cancel",
+                  "Format partition",
+                  nullptr,
+                  slot) != 1) {
+        return;
+    }
+    const char *error_message = disk_format_partition(disk, slot);
+    if (error_message != nullptr) {
+        fl_alert("%s", error_message);
+    }
     model_changed();
 }
 
@@ -937,63 +751,6 @@ void MainWindow::create_mbr()
         return;
     }
     disk_create_mbr(disk);
-    model_changed();
-}
-
-void MainWindow::new_partition()
-{
-    int slot = -1;
-    if (!dialog_new_partition(this, &slot)) {
-        return;
-    }
-    if (slot >= 0) {
-        state()->selected_partition = slot;
-    }
-    model_changed();
-}
-
-void MainWindow::delete_partition()
-{
-    disk_info_t *disk = current_disk();
-    const int slot = state()->selected_partition;
-    if (disk == nullptr || slot < 0 || !disk->partitions[slot].active) {
-        return;
-    }
-    if (fl_choice("Delete partition %d (%s, %s)?\n"
-                  "The removal is staged until you press Apply.",
-                  "Cancel",
-                  "Delete partition",
-                  nullptr,
-                  slot,
-                  disk_get_fs_type(disk->partitions[slot].type),
-                  gui::format_size((uint64_t) disk->partitions[slot].size_sectors * DISK_SECTOR_SIZE).c_str()) !=
-        1) {
-        return;
-    }
-    disk_delete_partition(disk, slot);
-    state()->selected_partition = -1;
-    model_changed();
-}
-
-void MainWindow::format_partition()
-{
-    disk_info_t *disk = current_disk();
-    const int slot = state()->selected_partition;
-    if (disk == nullptr || slot < 0 || !disk->partitions[slot].active) {
-        return;
-    }
-    if (fl_choice("Format partition %d as ZealFS v2?\n"
-                  "Its current contents are replaced when the changes are applied.",
-                  "Cancel",
-                  "Format partition",
-                  nullptr,
-                  slot) != 1) {
-        return;
-    }
-    const char *error_message = disk_format_partition(disk, slot);
-    if (error_message != nullptr) {
-        fl_alert("%s", error_message);
-    }
     model_changed();
 }
 
@@ -1039,29 +796,104 @@ void MainWindow::cancel_changes()
     model_changed();
 }
 
-void MainWindow::open_browser()
-{
-    disk_info_t *disk = current_disk();
-    const int slot = state()->selected_partition;
-    if (disk == nullptr || slot < 0 || !disk_is_valid_zealfs_partition(&disk->partitions[slot])) {
-        set_status("Select a ZealFS v2 partition to browse its files");
-        return;
-    }
-    if (browser_ == nullptr) {
-        browser_ = new BrowserWindow(this);
-    }
-    browser_->retarget(disk, slot);
-    browser_->show();
-    browser_->take_focus();
-    browser_->focus_files();
-}
-
 void MainWindow::show_about()
 {
-    fl_message("Zeal Disk Tool %s\n\n"
-               "Create and manage ZealFS v2 partitions, disk images and physical disks.\n"
-               "GUI powered by FLTK.",
-               VERSION);
+    dialog_about(this);
+}
+
+void MainWindow::show_shortcuts()
+{
+    fl_message("Keyboard shortcuts\n\n"
+               "Ctrl+O   Open a disk image\n"
+               "Ctrl+N   Create a disk image\n"
+               "Ctrl+P   Create a partition\n"
+               "Ctrl+S   Apply pending changes\n"
+               "Ctrl+I   Import files\n"
+               "Ctrl+E   Export the selection\n"
+               "Ctrl+B   Focus the file browser\n"
+               "Ctrl+F   Focus the search field\n"
+               "F5       Refresh devices\n"
+               "Delete   Delete the selected partition\n"
+               "Ctrl+Q   Quit");
+}
+
+void MainWindow::show_properties()
+{
+    disk_info_t *disk = current_disk();
+    if (disk == nullptr) {
+        fl_message("No disk selected.");
+        return;
+    }
+    const int slot = selected_slot();
+    char text[2048];
+    int offset = std::snprintf(text,
+                               sizeof(text),
+                               "Disk %d\n%s\n%s\n%s\n\nCapacity: %s\nPartition table: %s\n"
+                               "Pending changes: %s\nActive partitions: ",
+                               state()->selected_disk,
+                               disk->name,
+                               disk->path,
+                               disk->is_image ? "Disk image" : "Physical disk",
+                               utils::format_size(disk->size_bytes).c_str(),
+                               disk->has_mbr ? "MBR" : "Raw",
+                               disk->has_staged_changes ? "yes" : "no");
+    int used_slots = 0;
+    for (int index = 0; index < MAX_PART_COUNT; ++index) {
+        if (disk->partitions[index].active) {
+            ++used_slots;
+        }
+    }
+    offset += std::snprintf(text + offset, sizeof(text) - (size_t) offset, "%d of %d", used_slots, MAX_PART_COUNT);
+    if (slot >= 0 && slot < MAX_PART_COUNT && disk->partitions[slot].active) {
+        uint64_t used = 0;
+        uint64_t total = 0;
+        int percent = -1;
+        if (disk->partitions[slot].type == ZEALFS_TYPE && disk_fs_usage(disk, slot, &used, &total) == 0) {
+            percent = utils::percent_of(used, total);
+        }
+        char usage[64] = "not available";
+        if (percent >= 0) {
+            std::snprintf(usage, sizeof(usage), "%d%%", percent);
+        }
+        std::snprintf(text + offset,
+                      sizeof(text) - (size_t) offset,
+                      "\n\nPartition %d\nFile system: %s\nStart address: 0x%08llX\nSize: %s\nUsage: %s",
+                      slot,
+                      disk_get_fs_type(disk->partitions[slot].type),
+                      (unsigned long long) disk->partitions[slot].start_lba * (unsigned long long) DISK_SECTOR_SIZE,
+                      utils::format_size((uint64_t) disk->partitions[slot].size_sectors * DISK_SECTOR_SIZE).c_str(),
+                      usage);
+    }
+    fl_message("%s", text);
+}
+
+void MainWindow::show_create_menu(int screen_x, int screen_y)
+{
+    /* Reuse the menu bar entries so the labels, shortcuts, enabled state and
+     * actions stay in sync instead of duplicating the item list here. */
+    const Fl_Menu_Item *new_partition = menu_->find_item("&Disk/&New Partition...");
+    const Fl_Menu_Item *create_mbr = menu_->find_item("&Disk/Create &MBR...");
+    const Fl_Menu_Item *create_image = menu_->find_item("&File/Create &Image...");
+    const Fl_Menu_Item *open_image = menu_->find_item("&File/&Open Image...");
+    if (new_partition == nullptr || create_mbr == nullptr || create_image == nullptr || open_image == nullptr) {
+        return;
+    }
+    Fl_Menu_Item items[5];
+    items[0] = *new_partition;
+    items[1] = *create_mbr;
+    items[1].flags = (items[1].flags & ~FL_MENU_DIVIDER) | FL_MENU_DIVIDER;
+    items[2] = *create_image;
+    items[3] = *open_image;
+    items[4] = Fl_Menu_Item();
+
+    const char *scheme = Fl::scheme();
+    Fl::scheme(nullptr);
+    const Fl_Menu_Item *picked = items->popup(screen_x - x(), screen_y - y(), nullptr, nullptr, menu_);
+    Fl::scheme(scheme);
+    if (picked != nullptr) {
+        perform_menu_action(
+            static_cast<MenuAction>(reinterpret_cast<intptr_t>(picked->user_data())));
+    }
 }
 
 bool MainWindow::confirm_quit()
@@ -1075,9 +907,6 @@ bool MainWindow::confirm_quit()
             }
         }
         if (pending == nullptr) {
-            if (browser_ != nullptr) {
-                browser_->hide();
-            }
             return true;
         }
         const int answer = fl_choice("\"%s\" has unsaved changes.\n\n"
@@ -1105,64 +934,30 @@ bool MainWindow::confirm_quit()
     }
 }
 
-void MainWindow::layout_children()
+void MainWindow::apply_cb(Fl_Widget *, void *data)
 {
-    if (menu_ == nullptr) {
-        return;
-    }
-    const int margin = 14;
-    const int status_y = h() - kStatusHeight;
-
-    const int left_w = std::max(360, w() - margin * 2 - kPanelWidth - 14);
-    const int right_x = margin + left_w + 14;
-    const int right_w = w() - margin - right_x;
-
-    toolbar_bg_->resize(0, kMenuHeight, w(), kToolbarHeight);
-    int button_x = margin;
-    const int button_y = kMenuHeight + 8;
-    btn_mbr_->resize(button_x, button_y, 104, 30);
-    button_x += 112;
-    btn_new_partition_->resize(button_x, button_y, 122, 30);
-    button_x += 130;
-    btn_delete_->resize(button_x, button_y, 84, 30);
-    button_x += 92;
-    btn_format_->resize(button_x, button_y, 84, 30);
-
-    const int choice_w = w() < 1000 ? 220 : 290;
-    const int choice_x = w() - margin - choice_w;
-    disk_caption_->resize(choice_x - 46, button_y + 5, 42, 20);
-    disk_choice_->resize(choice_x, button_y + 5, choice_w, 24);
-
-    summary_->resize(margin, kMenuHeight + kToolbarHeight + 4, w() - margin * 2 - 190, 20);
-    staged_->resize(w() - margin - 180, kMenuHeight + kToolbarHeight + 4, 180, 20);
-
-    const int bar_top = kMenuHeight + kToolbarHeight + 30;
-    bar_->resize(margin, bar_top, left_w, kBarHeight);
-    partition_heading_->resize(margin, bar_top + kBarHeight + 6, left_w, 18);
-    const int table_top = bar_top + kBarHeight + 28;
-    table_->resize(margin, table_top, left_w, std::max(120, status_y - 8 - table_top));
-
-    const int panel_top = bar_top;
-    const int panel_h = std::max(240, status_y - 8 - panel_top);
-    panel_->resize(right_x, panel_top, right_w, panel_h);
-    panel_heading_->resize(right_x + 16, panel_top + 14, right_w - 32, 18);
-    panel_chip_->resize(right_x + 16, panel_top + 44, 16, 16);
-    details_->resize(right_x + 40, panel_top + 38, right_w - 56, 150);
-    usage_caption_->resize(right_x + 16, panel_top + 200, right_w - 32, 16);
-    usage_->resize(right_x + 16, panel_top + 218, right_w - 32, 18);
-    panel_disk_heading_->resize(right_x + 16, panel_top + 252, right_w - 32, 16);
-    panel_disk_->resize(right_x + 16, panel_top + 270, right_w - 32, 64);
-    btn_browse_->resize(right_x + 16, panel_top + 342, right_w - 32, 32);
-    const int half = (right_w - 40) / 2;
-    btn_panel_format_->resize(right_x + 16, panel_top + 382, half, 30);
-    btn_panel_delete_->resize(right_x + 24 + half, panel_top + 382, half, 30);
-
-    status_->resize(0, status_y, w(), kStatusHeight);
-    redraw();
+    static_cast<MainWindow *>(data)->apply_changes();
 }
 
-void MainWindow::resize(int x, int y, int w, int h)
+void MainWindow::menu_cb(Fl_Widget *widget, void *data)
 {
-    Fl_Double_Window::resize(x, y, w, h);
-    layout_children();
+    auto *window = static_cast<MainWindow *>(widget->window());
+    if (window == nullptr) {
+        return;
+    }
+    window->perform_menu_action(static_cast<MenuAction>(reinterpret_cast<intptr_t>(data)));
+}
+
+void MainWindow::model_status_cb(const char *message, void *user)
+{
+    static_cast<MainWindow *>(user)->set_status(message);
+}
+
+void MainWindow::window_close_cb(Fl_Widget *widget, void *data)
+{
+    (void) widget;
+    auto *window = static_cast<MainWindow *>(data);
+    if (window->confirm_quit()) {
+        window->hide();
+    }
 }

@@ -1,6 +1,5 @@
 /**
- * SPDX-FileCopyrightText: 2025 Zeal 8-bit Computer <contact@zeal8bit.com>
- * SPDX-FileCopyrightText: 2026 David Higgins <zoul0813@me.com>
+ * SPDX-FileCopyrightText: 2025-2026 Zeal 8-bit Computer <contact@zeal8bit.com>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -14,16 +13,14 @@
 #include <string>
 #include <vector>
 
-#include "MainWindow.hpp"
+#include "gui/MainWindow.hpp"
 #include "app_icon.h"
 
 #ifdef _WIN32
 #include <windows.h>
 #endif
 
-namespace {
-
-void print_usage(const char *program)
+static void print_usage(const char *program)
 {
     std::printf("Usage: %s [options] [<disk.img> ...]\n", program);
     std::printf("Options:\n");
@@ -34,7 +31,7 @@ void print_usage(const char *program)
 #endif
 }
 
-bool has_image_extension(const char *path)
+static bool has_image_extension(const char *path)
 {
     const char *dot = std::strrchr(path, '.');
     if (dot == nullptr) {
@@ -44,8 +41,6 @@ bool has_image_extension(const char *path)
     return std::tolower((unsigned char) extension[0]) == 'i' && std::tolower((unsigned char) extension[1]) == 'm' &&
            std::tolower((unsigned char) extension[2]) == 'g' && extension[3] == '\0';
 }
-
-}  // namespace
 
 int main(int argc, char *argv[])
 {

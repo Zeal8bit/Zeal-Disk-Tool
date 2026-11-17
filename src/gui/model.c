@@ -424,6 +424,21 @@ int disk_fs_import(disk_info_t* disk, int partition, const char* const* host_pat
     return fs_mutation(disk, result, count > 1 ? "Files imported (staged)" : "File imported (staged)");
 }
 
+int disk_fs_read(disk_info_t* disk, int partition, const char* path, uint64_t offset, void* buffer, size_t size,
+                 size_t* read_count)
+{
+    if (disk == NULL) {
+        status("No disk selected");
+        return -1;
+    }
+    zfs_status result = zfs_file_read(disk->handle, partition, path, offset, buffer, size, read_count, &error);
+    if (result != ZFS_OK) {
+        status(error.message);
+        return -1;
+    }
+    return 0;
+}
+
 int disk_fs_export(disk_info_t* disk, int partition, const char* path, const char* host_path,
                    zfs_progress_fn progress, void* user)
 {

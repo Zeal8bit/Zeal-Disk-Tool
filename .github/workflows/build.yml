@@ -56,17 +56,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Build Raylib 6.2
-        run: |
-          mkdir -p build/deps
-          curl -fL https://github.com/raysan5/raylib/archive/refs/tags/6.2.tar.gz -o build/deps/raylib.tar.gz
-          tar -xzf build/deps/raylib.tar.gz -C build/deps
-          cmake -S build/deps/raylib-6.2 -B build/deps/raylib-build -DBUILD_EXAMPLES=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/build/deps/raylib-install"
-          cmake --build build/deps/raylib-build --parallel 3
-          cmake --install build/deps/raylib-build
+      - name: Install FLTK
+        run: brew install fltk
       - name: Build, test and package
         run: |
-          cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Release -DRAYLIB_INCLUDE_DIR="$PWD/build/deps/raylib-install/include" -DRAYLIB_LIBRARY="$PWD/build/deps/raylib-install/lib/libraylib.a"
+          cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix fltk)"
           cmake --build build/release --parallel 3
           ctest --test-dir build/release --output-on-failure
           cmake --build build/release --target package
@@ -91,16 +85,11 @@ jobs:
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-fltk
       - name: Build, test and package native Windows binaries
         shell: msys2 {0}
         run: |
-          mkdir -p build/deps
-          curl -fL https://github.com/raysan5/raylib/archive/refs/tags/6.2.tar.gz -o build/deps/raylib.tar.gz
-          tar -xzf build/deps/raylib.tar.gz -C build/deps
-          cmake -S build/deps/raylib-6.2 -B build/deps/raylib-build -G Ninja -DBUILD_EXAMPLES=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/build/deps/raylib-install"
-          cmake --build build/deps/raylib-build --parallel 3
-          cmake --install build/deps/raylib-build
-          cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DRAYLIB_INCLUDE_DIR="$PWD/build/deps/raylib-install/include" -DRAYLIB_LIBRARY="$PWD/build/deps/raylib-install/lib/libraylib.a"
+          cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build/release --parallel 3
           ctest --test-dir build/release --output-on-failure
           cmake --build build/release --target package

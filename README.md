@@ -1,6 +1,6 @@
 # Zeal Disk Tool
 
-Zeal Disk Tool manages ZealFS v2 disk images and physical disks for the Zeal 8-bit Computer. It provides a graphical application, `zeal_disk_tool`, built with FLTK, and a terminal tool, `zdt`, backed by the same C library.
+Zeal Disk Tool manages ZealFS v2 disk images and physical disks for the Zeal 8-bit Computer. It provides a modern single-window graphical application, `zeal_disk_tool`, built with FLTK, and a terminal tool, `zdt`, backed by the same C library.
 
 ![Zeal Disk Tool](md_imgs/zeal_disk_tool_screen1.png)
 
@@ -13,7 +13,7 @@ The project supports macOS, Linux (including Raspberry Pi) and Windows. See [sup
 | Guide | Topics |
 | --- | --- |
 | [CLI](docs/CLI.md) | Commands, options, interactive shell and history, recursive export, merge/restore, automation |
-| [GUI](docs/GUI.md) | Open/create images, select cards, manage partitions, browse/import/export files, Apply and Cancel |
+| [GUI](docs/GUI.md) | Single-window disk sidebar, partition map and details, embedded file browser, Apply and Cancel |
 | [ZealFS concepts](docs/ZEALFS.md) | MBR versus raw layouts, partition numbering, names, paths, allocation and capacity limits |
 | [Working with disks](docs/DISKS.md) | Shared staging behavior, image/device writes, imports/exports versus backups, permissions and discovery troubleshooting |
 | [Build and installation](docs/BUILD.md) | Supported platforms, CMake, FLTK, cross-compilation, packages and tests |
@@ -38,6 +38,6 @@ To update a card from a downloaded software image, follow [merge and restore](do
 
 ## License
 
-Apache-2.0; see [LICENSE](LICENSE). Existing copyright and third-party license notices are retained. FLTK is an external dependency and retains its own license.
+Apache-2.0; see [LICENSE](LICENSE). The GUI bundles the [Lucide](https://lucide.dev) icon set under the ISC license (see [packages/icons/lucide/LICENSE](packages/icons/lucide/LICENSE)). The About wordmark outlines the [Righteous](https://fonts.google.com/specimen/Righteous) typeface, licensed under the SIL Open Font License 1.1 (see [packages/icons/righteous-OFL.txt](packages/icons/righteous-OFL.txt)). Existing copyright and third-party license notices are retained. FLTK is an external dependency and retains its own license.
 
 Contact: contact [at] zeal8bit [dot] com.

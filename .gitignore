@@ -4,8 +4,8 @@
 *.AppImage
 AppDeploy
 appdir/zeal_disk_tool
-raylib/
 build/
+build-*/
 appdir/*.res
 zeal_disk_tool.elf.dSYM
 .vscode/settings.json

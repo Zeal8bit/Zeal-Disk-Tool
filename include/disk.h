@@ -6,9 +6,7 @@
  */
 #ifndef DISK_H
 #define DISK_H
-/* GUI view models and adapters; public functional API is disk_tool.h.
- * This layer, like the rest of the core, is plain C. The FLTK frontend is C++
- * and only consumes these functions. */
+/* GUI view models and adapters; public functional API is disk_tool.h. */
 #include "disk_tool.h"
 #include <stdbool.h>
 #include <stdio.h>
@@ -159,12 +157,12 @@ int disk_fs_import(disk_info_t* disk, int partition, const char* const* host_pat
                    const char* destination, zfs_progress_fn progress, void* user);
 int disk_fs_export(disk_info_t* disk, int partition, const char* path, const char* host_path,
                    zfs_progress_fn progress, void* user);
+/* Read at most `size` bytes from a file; used by the preview pane. */
+int disk_fs_read(disk_info_t* disk, int partition, const char* path, uint64_t offset, void* buffer, size_t size,
+                 size_t* read_count);
 
 /**
  * @brief Open a disk image file from a given path and add it to the disk list.
- *
- * Unlike the file-dialog entry point of older frontends, this function does not
- * prompt the user; the FLTK frontend owns host file dialogs.
  *
  * @param state A pointer to the disk list state where the disk image will be added.
  * @param path  Path to the image file to open.
